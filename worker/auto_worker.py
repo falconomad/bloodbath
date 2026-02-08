@@ -1,7 +1,10 @@
 
+from setup_db import init_db
+init_db()
 import time
 import sqlite3
 from src.advisor import run_top20_cycle
+
 
 DB = "/tmp/portfolio.db"
 
