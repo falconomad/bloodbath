@@ -23,9 +23,9 @@ if is_dark:
     border = "#232a35"
     text = "#e7edf7"
     panel = "#121722"
-    metric_bg_1 = "#2d2417"
-    metric_bg_2 = "#1d2d22"
-    metric_bg_3 = "#2a1f2c"
+    metric_bg_1 = "#3f372b"
+    metric_bg_2 = "#4b584f"
+    metric_bg_3 = "#413342"
     plot_template = "plotly_dark"
 else:
     bg = "#f6f7fb"
