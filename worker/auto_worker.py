@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.db import get_connection, init_db
+from src.db import claim_worker_run, get_connection, init_db
 from src.advisor import run_top20_cycle
 
 DB_AVAILABLE = True
@@ -70,23 +70,30 @@ def is_market_active_cet(now=None):
     return market_open <= now_time <= market_close
 
 
-def is_opening_window_cet(now=None):
-    """Run once shortly after market open to avoid repeated intra-day re-entry."""
-    current = now or datetime.now(ZoneInfo("Europe/Paris"))
-    if current.weekday() >= 5:
-        return False
+def build_run_key(now=None):
+    """Create a stable run key to avoid duplicate trades from cron retries.
 
-    now_time = current.time().replace(tzinfo=None)
-    return time(15, 30) <= now_time < time(15, 40)
+    We use 10-minute buckets because the workflow is typically scheduled every 10 minutes.
+    """
+    current = now or datetime.now(ZoneInfo("Europe/Paris"))
+    bucket_minute = (current.minute // 10) * 10
+    return f"{current.strftime('%Y-%m-%d')}-{current.hour:02d}-{bucket_minute:02d}"
 
 
 def main():
-    if is_market_active_cet() and is_opening_window_cet():
-        history, transactions = run_top20_cycle()
-        save(history, transactions)
-        print("Cycle complete.")
-    else:
-        print("Outside opening execution window; skipping analysis and actions.")
+    if not is_market_active_cet():
+        print("Outside market window; skipping analysis and actions.")
+        return
+
+    if DB_AVAILABLE:
+        run_key = build_run_key()
+        if not claim_worker_run(run_key):
+            print(f"Run key {run_key} already processed; skipping duplicate execution.")
+            return
+
+    history, transactions = run_top20_cycle()
+    save(history, transactions)
+    print("Cycle complete.")
 
 
 if __name__ == "__main__":

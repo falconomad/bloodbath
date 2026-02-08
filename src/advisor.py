@@ -1,8 +1,7 @@
-
 from src.api.data_fetcher import get_price_data, get_company_news
 from src.analysis.sentiment import analyze_news_sentiment
 from src.analysis.technicals import calculate_technicals
-from src.analysis.events import detect_events
+from src.analysis.events import calculate_event_score
 
 
 def _as_float(value):
@@ -10,17 +9,14 @@ def _as_float(value):
         return float(value.iloc[0])
     return float(value)
 
-def generate_recommendation(ticker):
 
-    data = get_price_data(ticker)
-
+def generate_recommendation(ticker, price_data=None, news=None):
+    data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
-
-    news = get_company_news(ticker)
-
-    sentiment = analyze_news_sentiment(news)
-
-    event_flag = detect_events(news)
+    headlines = news if news is not None else get_company_news(ticker)
+    sentiment = analyze_news_sentiment(headlines)
+    event_score = calculate_event_score(headlines)
+    event_flag = event_score != 0
 
     score = 0
 
@@ -31,8 +27,7 @@ def generate_recommendation(ticker):
 
     score += sentiment
 
-    if event_flag:
-        score += 0.5
+    score += event_score
 
     if score > 1:
         decision = "BUY"
@@ -41,23 +36,25 @@ def generate_recommendation(ticker):
     else:
         decision = "HOLD"
 
-    confidence = abs(score) * 20
+    confidence = min(abs(score) * 20, 100)
 
     return {
         "ticker": ticker,
         "trend": trend,
         "sentiment": sentiment,
         "event_detected": event_flag,
+        "event_score": event_score,
         "composite_score": round(score, 4),
         "decision": decision,
         "confidence": round(confidence, 2),
-        "data": data
+        "data": data,
     }
 
 
 from src.trading.paper_trader import VirtualPortfolio
 
 portfolio = VirtualPortfolio(starting_capital=500)
+
 
 def simulate_day(ticker, decision, price):
     market = {ticker: price}
@@ -74,13 +71,14 @@ def simulate_day(ticker, decision, price):
         "cash": portfolio.cash,
         "holdings": portfolio.holdings,
         "history": portfolio.balance_history,
-        "log": portfolio.trade_log
+        "log": portfolio.trade_log,
     }
 
 
 from src.core.fund_manager import AutoFundManager
 
 manager = AutoFundManager(starting_capital=500)
+
 
 def run_autonomous_cycle(ticker, decision, data):
     price = _as_float(data["Close"].iloc[-1])
@@ -92,36 +90,39 @@ from src.core.sp500_manager import SP500AutoManager
 
 sp500_manager = SP500AutoManager(starting_capital=500)
 
+
 def run_sp500_cycle(decision, data):
     price = _as_float(data["Close"].iloc[-1])
     sp500_manager.step(decision, price)
     return sp500_manager.get_history_df(), sp500_manager.get_transactions_df()
 
 
-import yfinance as yf
 from src.core.sp500_list import TOP20
 from src.core.top20_manager import Top20AutoManager
 
 top20_manager = Top20AutoManager(starting_capital=500)
 
+
 def run_top20_cycle():
     analyses = []
 
     for ticker in TOP20:
-        data = yf.download(ticker, period="1mo", interval="1d")
+        data = get_price_data(ticker, period="6mo", interval="1d")
         if data.empty:
             continue
 
         price = _as_float(data["Close"].iloc[-1])
+        headlines = get_company_news(ticker)
+        rec = generate_recommendation(ticker, price_data=data, news=headlines)
 
-        rec = generate_recommendation(ticker)
-
-        analyses.append({
-            "ticker": ticker,
-            "decision": rec["decision"],
-            "score": rec["composite_score"],
-            "price": price
-        })
+        analyses.append(
+            {
+                "ticker": ticker,
+                "decision": rec["decision"],
+                "score": rec["composite_score"],
+                "price": price,
+            }
+        )
 
     if analyses:
         top20_manager.step(analyses)
