@@ -1,5 +1,7 @@
 from pathlib import Path
 import sys
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 # Ensure repo root is on sys.path when running as `python worker/auto_worker.py`.
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -47,7 +49,28 @@ def save(history, transactions):
 
 print("GitHub Actions worker starting one execution cycle...")
 
-history, transactions = run_top20_cycle()
-save(history, transactions)
+def is_market_active_cet(now=None):
+    """Return True when the market window is open in CET/CEST.
 
-print("Cycle complete.")
+    Defaults to Monday-Friday between 15:30 and 22:00 in Europe/Paris
+    (15:30-22:00 CET in winter, 15:30-22:00 CEST in summer).
+    """
+    current = now or datetime.now(ZoneInfo("Europe/Paris"))
+
+    # Monday=0, Sunday=6
+    if current.weekday() >= 5:
+        return False
+
+    market_open = time(15, 30)
+    market_close = time(22, 0)
+    now_time = current.time().replace(tzinfo=None)
+
+    return market_open <= now_time <= market_close
+
+
+if is_market_active_cet():
+    history, transactions = run_top20_cycle()
+    save(history, transactions)
+    print("Cycle complete.")
+else:
+    print("Market inactive in CET/CEST window; skipping analysis and actions.")
