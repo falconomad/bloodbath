@@ -47,6 +47,22 @@ def init_db():
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS position_snapshots (
+            time TEXT,
+            ticker TEXT,
+            shares INTEGER,
+            avg_cost REAL,
+            current_price REAL,
+            market_value REAL,
+            allocation REAL,
+            pnl REAL,
+            pnl_pct REAL
+        );
+    """
+    )
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS worker_runs (
             run_key TEXT PRIMARY KEY,
             created_at TIMESTAMPTZ DEFAULT NOW()

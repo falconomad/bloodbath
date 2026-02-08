@@ -20,7 +20,7 @@ class Top20ManagerTests(unittest.TestCase):
         self.assertIn("BBB", manager.holdings)
 
         total_invested = sum(
-            manager.holdings[t] * manager.last_price_by_ticker[t] for t in manager.holdings
+            manager.holdings[t]["shares"] * manager.last_price_by_ticker[t] for t in manager.holdings
         )
         self.assertLessEqual(total_invested, 500.0)
         self.assertGreaterEqual(manager.cash, 0.0)
@@ -35,7 +35,7 @@ class Top20ManagerTests(unittest.TestCase):
             ]
         )
 
-        aaa_shares = manager.holdings.get("AAA", 0)
+        aaa_shares = manager.holdings.get("AAA", {}).get("shares", 0)
         self.assertGreater(aaa_shares, 0)
 
         manager.step(
@@ -70,6 +70,23 @@ class Top20ManagerTests(unittest.TestCase):
 
         history = manager.history_df()
         self.assertGreater(float(history.iloc[-1]["Portfolio Value"]), 500.0)
+
+    def test_position_snapshot_includes_allocation_and_pnl(self):
+        manager = Top20AutoManager(starting_capital=500, max_positions=2, max_allocation_per_position=0.6)
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0},
+            {"ticker": "BBB", "decision": "BUY", "score": 1.9, "price": 50.0},
+        ])
+        manager.step([
+            {"ticker": "AAA", "decision": "HOLD", "score": 0.2, "price": 110.0},
+            {"ticker": "BBB", "decision": "HOLD", "score": 0.1, "price": 45.0},
+        ])
+
+        snapshot = manager.position_snapshot_df("2026-01-01 10:00:00")
+
+        self.assertFalse(snapshot.empty)
+        self.assertTrue({"allocation", "pnl", "pnl_pct"}.issubset(set(snapshot.columns)))
+        self.assertAlmostEqual(float(snapshot["allocation"].sum()), 1.0, places=2)
 
 
 if __name__ == "__main__":

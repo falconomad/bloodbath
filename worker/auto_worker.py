@@ -21,7 +21,7 @@ except Exception as exc:
     print(f"Database initialization failed; continuing without persistence: {exc}")
 
 
-def save(history, transactions):
+def save(history, transactions, positions):
     if not DB_AVAILABLE:
         print("Skipping DB save because database is unavailable.")
         return
@@ -41,6 +41,31 @@ def save(history, transactions):
             c.execute(
                 "INSERT INTO transactions (time, ticker, action, shares, price) VALUES (%s, %s, %s, %s, %s)",
                 (t["time"], t["ticker"], t["action"], int(t["shares"]), float(t["price"])),
+            )
+
+    if not positions.empty:
+        snapshot_time = str(positions.iloc[0]["time"])
+        c.execute("DELETE FROM position_snapshots WHERE time = %s", (snapshot_time,))
+
+        for _, p in positions.iterrows():
+            c.execute(
+                """
+                INSERT INTO position_snapshots (
+                    time, ticker, shares, avg_cost, current_price,
+                    market_value, allocation, pnl, pnl_pct
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    p["time"],
+                    p["ticker"],
+                    int(p["shares"]),
+                    float(p["avg_cost"]),
+                    float(p["current_price"]),
+                    float(p["market_value"]),
+                    float(p["allocation"]),
+                    float(p["pnl"]),
+                    float(p["pnl_pct"]),
+                ),
             )
 
     conn.commit()
@@ -91,8 +116,8 @@ def main():
             print(f"Run key {run_key} already processed; skipping duplicate execution.")
             return
 
-    history, transactions = run_top20_cycle()
-    save(history, transactions)
+    history, transactions, positions = run_top20_cycle()
+    save(history, transactions, positions)
     print("Cycle complete.")
 
 
