@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-from datetime import datetime, time
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # Ensure repo root is on sys.path when running as `python worker/auto_worker.py`.
@@ -76,25 +76,6 @@ def save(history, transactions, positions):
 print("GitHub Actions worker starting one execution cycle...")
 
 
-def is_market_active_cet(now=None):
-    """Return True when the market window is open in CET/CEST.
-
-    Defaults to Monday-Friday between 15:30 and 22:00 in Europe/Paris
-    (15:30-22:00 CET in winter, 15:30-22:00 CEST in summer).
-    """
-    current = now or datetime.now(ZoneInfo("Europe/Paris"))
-
-    # Monday=0, Sunday=6
-    if current.weekday() >= 5:
-        return False
-
-    market_open = time(15, 30)
-    market_close = time(22, 0)
-    now_time = current.time().replace(tzinfo=None)
-
-    return market_open <= now_time <= market_close
-
-
 def build_run_key(now=None):
     """Create a stable run key to avoid duplicate trades from cron retries.
 
@@ -106,10 +87,6 @@ def build_run_key(now=None):
 
 
 def main():
-    if not is_market_active_cet():
-        print("Outside market window; skipping analysis and actions.")
-        return
-
     if DB_AVAILABLE:
         run_key = build_run_key()
         if not claim_worker_run(run_key):
