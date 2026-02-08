@@ -1,9 +1,24 @@
+import os
 from transformers import pipeline
 
-sentiment_model = pipeline(
-    "sentiment-analysis",
-    model="ProsusAI/finbert"
-)
+
+def _build_sentiment_model():
+    """Create the FinBERT pipeline when credentials are available."""
+    hf_token = os.getenv("HF_TOKEN")
+    if not hf_token:
+        return None
+
+    try:
+        return pipeline(
+            "sentiment-analysis",
+            model="ProsusAI/finbert",
+            token=hf_token,
+        )
+    except Exception:
+        return None
+
+
+sentiment_model = _build_sentiment_model()
 
 
 def _lexical_fallback_score(text):
@@ -28,6 +43,10 @@ def _lexical_fallback_score(text):
 def analyze_news_sentiment(news_list):
     if not news_list:
         return 0
+
+    if sentiment_model is None:
+        fallback = sum(_lexical_fallback_score(item) for item in news_list) / len(news_list)
+        return round(max(min(fallback, 1.0), -1.0), 2)
 
     try:
         results = sentiment_model(news_list)
