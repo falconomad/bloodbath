@@ -3,6 +3,7 @@ import os
 from datetime import date, timedelta
 
 import finnhub
+import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 
@@ -29,3 +30,40 @@ def get_company_news(ticker, lookback_days=7, limit=10):
         return [h for h in headlines if h][:limit]
     except Exception:
         return []
+
+
+def get_bulk_price_data(tickers, period="6mo", interval="1d"):
+    """Fetch OHLCV data for multiple tickers in one yfinance call."""
+    if not tickers:
+        return {}
+
+    try:
+        frame = yf.download(
+            tickers=tickers,
+            period=period,
+            interval=interval,
+            group_by="ticker",
+            auto_adjust=False,
+            progress=False,
+            threads=True,
+        )
+    except Exception:
+        return {ticker: pd.DataFrame() for ticker in tickers}
+
+    if frame.empty:
+        return {ticker: pd.DataFrame() for ticker in tickers}
+
+    # MultiIndex columns when multiple symbols are fetched.
+    if isinstance(frame.columns, pd.MultiIndex):
+        output = {}
+        for ticker in tickers:
+            if ticker in frame.columns.get_level_values(0):
+                data = frame[ticker].dropna(how="all")
+                output[ticker] = data
+            else:
+                output[ticker] = pd.DataFrame()
+        return output
+
+    # Single ticker fallback shape.
+    ticker = tickers[0]
+    return {ticker: frame.dropna(how="all")}
