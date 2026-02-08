@@ -1,30 +1,34 @@
-
-from setup_db import init_db
-init_db()
+from src.db import get_connection, init_db
 import time
-import sqlite3
 from src.advisor import run_top20_cycle
 
-
-DB = "/tmp/portfolio.db"
+# Ensure tables exist in PostgreSQL
+init_db()
 
 def save(history, transactions):
-    conn = sqlite3.connect(DB)
+    conn = get_connection()
     c = conn.cursor()
 
     if not history.empty:
         last = history.iloc[-1]
-        c.execute("INSERT INTO portfolio VALUES (?, ?)", (str(last['Step']), float(last['Portfolio Value'])))
+        c.execute(
+            "INSERT INTO portfolio (time, value) VALUES (%s, %s)",
+            (str(last['Step']), float(last['Portfolio Value']))
+        )
 
     if not transactions.empty:
         t = transactions.iloc[-1]
-        c.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?)",
-                  (t['time'], t['ticker'], t['action'], int(t['shares']), float(t['price'])))
+        c.execute(
+            "INSERT INTO transactions (time, ticker, action, shares, price) VALUES (%s, %s, %s, %s, %s)",
+            (t['time'], t['ticker'], t['action'], int(t['shares']), float(t['price']))
+        )
 
     conn.commit()
+    c.close()
     conn.close()
 
-print("Autonomous Worker Running...")
+
+print("Autonomous Worker Running (PostgreSQL Mode)...")
 
 while True:
     history, transactions = run_top20_cycle()
