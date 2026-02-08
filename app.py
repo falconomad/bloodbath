@@ -6,7 +6,7 @@ import plotly.express as px
 
 st.title("Autonomous AI Fund Manager – Top 20 S&P 500")
 
-conn = sqlite3.connect("tmp/portfolio.db")
+conn = sqlite3.connect("/tmp/portfolio.db")
 
 portfolio = pd.read_sql("SELECT * FROM portfolio", conn)
 transactions = pd.read_sql("SELECT * FROM transactions", conn)
