@@ -4,6 +4,12 @@ from src.analysis.sentiment import analyze_news_sentiment
 from src.analysis.technicals import calculate_technicals
 from src.analysis.events import detect_events
 
+
+def _as_float(value):
+    if hasattr(value, "iloc"):
+        return float(value.iloc[0])
+    return float(value)
+
 def generate_recommendation(ticker):
 
     data = get_price_data(ticker)
@@ -76,7 +82,7 @@ from src.core.fund_manager import AutoFundManager
 manager = AutoFundManager(starting_capital=500)
 
 def run_autonomous_cycle(ticker, decision, data):
-    price = float(data["Close"].iloc[-1])
+    price = _as_float(data["Close"].iloc[-1])
     manager.step(decision, price)
     return manager.get_history()
 
@@ -86,7 +92,7 @@ from src.core.sp500_manager import SP500AutoManager
 sp500_manager = SP500AutoManager(starting_capital=500)
 
 def run_sp500_cycle(decision, data):
-    price = float(data["Close"].iloc[-1])
+    price = _as_float(data["Close"].iloc[-1])
     sp500_manager.step(decision, price)
     return sp500_manager.get_history_df(), sp500_manager.get_transactions_df()
 
@@ -105,7 +111,7 @@ def run_top20_cycle():
         if data.empty:
             continue
 
-        price = float(data["Close"].iloc[-1])
+        price = _as_float(data["Close"].iloc[-1])
 
         rec = generate_recommendation(ticker)
 
