@@ -23,6 +23,9 @@ if is_dark:
     border = "#232a35"
     text = "#e7edf7"
     panel = "#121722"
+    metric_bg_1 = "#3f372b"
+    metric_bg_2 = "#4b584f"
+    metric_bg_3 = "#413342"
     plot_template = "plotly_dark"
 else:
     bg = "#f6f7fb"
@@ -30,6 +33,9 @@ else:
     border = "#e8ebf2"
     text = "#1f2a44"
     panel = "#ffffff"
+    metric_bg_1 = "#fff4e4"
+    metric_bg_2 = "#e1ffea"
+    metric_bg_3 = "#f4e1ee"
     plot_template = "plotly_white"
 
 st.markdown(
@@ -98,15 +104,15 @@ st.markdown(
       }}
       /* Portfolio metric cards (first row, 3 columns) */
       [data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] {{
-        background: #fff4e4;
+        background: {metric_bg_1};
         animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.2s infinite alternate;
       }}
       [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetric"] {{
-        background: #e1ffea;
+        background: {metric_bg_2};
         animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.45s infinite alternate;
       }}
       [data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stMetric"] {{
-        background: #f4e1ee;
+        background: {metric_bg_3};
         animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.7s infinite alternate;
       }}
       [data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{
