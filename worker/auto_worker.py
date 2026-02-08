@@ -20,6 +20,7 @@ except Exception as exc:
     DB_AVAILABLE = False
     print(f"Database initialization failed; continuing without persistence: {exc}")
 
+
 def save(history, transactions):
     if not DB_AVAILABLE:
         print("Skipping DB save because database is unavailable.")
@@ -32,15 +33,15 @@ def save(history, transactions):
         last = history.iloc[-1]
         c.execute(
             "INSERT INTO portfolio (time, value) VALUES (%s, %s)",
-            (str(last['Step']), float(last['Portfolio Value']))
+            (str(last["Step"]), float(last["Portfolio Value"])),
         )
 
     if not transactions.empty:
-        t = transactions.iloc[-1]
-        c.execute(
-            "INSERT INTO transactions (time, ticker, action, shares, price) VALUES (%s, %s, %s, %s, %s)",
-            (t['time'], t['ticker'], t['action'], int(t['shares']), float(t['price']))
-        )
+        for _, t in transactions.iterrows():
+            c.execute(
+                "INSERT INTO transactions (time, ticker, action, shares, price) VALUES (%s, %s, %s, %s, %s)",
+                (t["time"], t["ticker"], t["action"], int(t["shares"]), float(t["price"])),
+            )
 
     conn.commit()
     c.close()
@@ -48,6 +49,7 @@ def save(history, transactions):
 
 
 print("GitHub Actions worker starting one execution cycle...")
+
 
 def is_market_active_cet(now=None):
     """Return True when the market window is open in CET/CEST.
@@ -68,9 +70,24 @@ def is_market_active_cet(now=None):
     return market_open <= now_time <= market_close
 
 
-if is_market_active_cet():
-    history, transactions = run_top20_cycle()
-    save(history, transactions)
-    print("Cycle complete.")
-else:
-    print("Market inactive in CET/CEST window; skipping analysis and actions.")
+def is_opening_window_cet(now=None):
+    """Run once shortly after market open to avoid repeated intra-day re-entry."""
+    current = now or datetime.now(ZoneInfo("Europe/Paris"))
+    if current.weekday() >= 5:
+        return False
+
+    now_time = current.time().replace(tzinfo=None)
+    return time(15, 30) <= now_time < time(15, 40)
+
+
+def main():
+    if is_market_active_cet() and is_opening_window_cet():
+        history, transactions = run_top20_cycle()
+        save(history, transactions)
+        print("Cycle complete.")
+    else:
+        print("Outside opening execution window; skipping analysis and actions.")
+
+
+if __name__ == "__main__":
+    main()
