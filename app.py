@@ -1,10 +1,18 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import base64
+from pathlib import Path
 
 from src.db import get_connection, init_db
 
 st.set_page_config(page_title="Bloodbath", page_icon="🩸", layout="wide")
+
+logo_path = Path("assets/bloodbath_logo.svg")
+logo_uri = ""
+if logo_path.exists():
+    logo_bytes = logo_path.read_bytes()
+    logo_uri = f"data:image/svg+xml;base64,{base64.b64encode(logo_bytes).decode('utf-8')}"
 
 theme_base = st.get_option("theme.base") or "light"
 is_dark = theme_base.lower() == "dark"
@@ -41,8 +49,21 @@ st.markdown(
         position: fixed;
       }}
       .block-container {{
-        padding-top: 1rem;
+        padding-top: 6.25rem;
         max-width: 1200px;
+      }}
+      .bb-fixed-topbar-wrap {{
+        position: fixed;
+        top: 0.75rem;
+        left: 0;
+        right: 0;
+        z-index: 999;
+        pointer-events: none;
+      }}
+      .bb-fixed-topbar {{
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 1rem;
       }}
       [data-testid="stMetric"] {{
         background: {card};
@@ -57,13 +78,20 @@ st.markdown(
         background: {panel};
         border: 1px solid {border};
         border-radius: 16px;
-        padding: 10px 16px;
-        margin-bottom: 1rem;
+        padding: 12px 16px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.10);
+        pointer-events: auto;
+      }}
+      .bb-logo {{
+        width: 58px;
+        height: 58px;
+        object-fit: contain;
+        display: block;
       }}
       .bb-topbar-title {{
         font-size: 2rem;
         font-weight: 700;
-        line-height: 1;
+        line-height: 1.15;
         letter-spacing: -0.02em;
       }}
       h2, h3 {{
@@ -74,11 +102,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-logo_col, title_col = st.columns([0.08, 0.92])
-with logo_col:
-    st.image("assets/bloodbath_logo.svg", width=58)
-with title_col:
-    st.markdown('<div class="bb-topbar"><span class="bb-topbar-title">Bloodbath</span></div>', unsafe_allow_html=True)
+logo_html = f'<img src="{logo_uri}" alt="Bloodbath logo" class="bb-logo">' if logo_uri else "🩸"
+st.markdown(
+    f'''    <div class="bb-fixed-topbar-wrap">
+      <div class="bb-fixed-topbar">
+        <div class="bb-topbar">{logo_html}<span class="bb-topbar-title">Bloodbath</span></div>
+      </div>
+    </div>
+    ''',
+    unsafe_allow_html=True,
+)
 
 db_ready = True
 try:
