@@ -42,6 +42,37 @@ st.markdown(
       [data-testid="stHeader"] {{
         background: {bg};
         border-bottom: 1px solid {border};
+        height: 4.75rem;
+        min-height: 4.75rem;
+        position: fixed;
+        top: 0;
+        z-index: 1000;
+      }}
+      [data-testid="stHeader"]::before {{
+        content: "";
+        position: absolute;
+        left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
+        top: 50%;
+        width: 2.5rem;
+        height: 2.5rem;
+        transform: translateY(-50%);
+        border-radius: 0.6rem;
+        background-image: url('{logo_uri}');
+        background-size: contain;
+        background-repeat: no-repeat;
+        background-position: center;
+      }}
+      [data-testid="stHeader"]::after {{
+        content: "Bloodbath";
+        position: absolute;
+        left: max(calc((100vw - 1200px) / 2 + 4.1rem), 4.1rem);
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 1.8rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: {text};
+        line-height: 1;
       }}
       [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{
         visibility: hidden;
@@ -49,67 +80,39 @@ st.markdown(
         position: fixed;
       }}
       .block-container {{
-        padding-top: 6.25rem;
+        padding-top: 7.1rem;
         max-width: 1200px;
-      }}
-      .bb-fixed-topbar-wrap {{
-        position: fixed;
-        top: 0.75rem;
-        left: 0;
-        right: 0;
-        z-index: 999;
-        pointer-events: none;
-      }}
-      .bb-fixed-topbar {{
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 0 1rem;
       }}
       [data-testid="stMetric"] {{
         background: {card};
         border: 1px solid {border};
         border-radius: 16px;
         padding: 10px 16px;
+        animation: bb-fade-rise 0.55s ease both;
       }}
-      .bb-topbar {{
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        background: {panel};
-        border: 1px solid {border};
-        border-radius: 16px;
-        padding: 12px 16px;
-        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.10);
-        pointer-events: auto;
+      [data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{
+        animation: bb-fade-rise 0.7s ease both;
       }}
-      .bb-logo {{
-        width: 58px;
-        height: 58px;
-        object-fit: contain;
-        display: block;
+      [data-testid="stPlotlyChart"] {{
+        animation-delay: 0.08s;
       }}
-      .bb-topbar-title {{
-        font-size: 2rem;
-        font-weight: 700;
-        line-height: 1.15;
-        letter-spacing: -0.02em;
+      @keyframes bb-fade-rise {{
+        from {{
+          opacity: 0;
+          transform: translateY(12px);
+          filter: blur(2px);
+        }}
+        to {{
+          opacity: 1;
+          transform: translateY(0);
+          filter: blur(0);
+        }}
       }}
       h2, h3 {{
         letter-spacing: -0.01em;
       }}
     </style>
     """,
-    unsafe_allow_html=True,
-)
-
-logo_html = f'<img src="{logo_uri}" alt="Bloodbath logo" class="bb-logo">' if logo_uri else "🩸"
-st.markdown(
-    f'''    <div class="bb-fixed-topbar-wrap">
-      <div class="bb-fixed-topbar">
-        <div class="bb-topbar">{logo_html}<span class="bb-topbar-title">Bloodbath</span></div>
-      </div>
-    </div>
-    ''',
     unsafe_allow_html=True,
 )
 
