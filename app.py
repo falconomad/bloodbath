@@ -113,7 +113,7 @@ st.markdown(
         border-radius: 16px;
         box-shadow: 0 8px 30px rgba(18, 24, 33, 0.04);
         padding: 12px 16px;
-        animation: bb-fade-rise 0.55s ease both;
+        animation: bb-fade-rise 0.65s ease both;
         transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
       }}
       [data-testid="stMetric"]:hover {{
@@ -123,18 +123,18 @@ st.markdown(
       /* Portfolio metric cards (first row, 3 columns) */
       [data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] {{
         background: {metric_bg_1};
-        animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.2s infinite alternate;
+        animation: bb-fade-rise 0.65s ease both, bb-bg-fade 5.0s ease-in-out 0.25s infinite alternate;
       }}
       [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetric"] {{
         background: {metric_bg_2};
-        animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.45s infinite alternate;
+        animation: bb-fade-rise 0.65s ease both, bb-bg-fade 5.0s ease-in-out 0.5s infinite alternate;
       }}
       [data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stMetric"] {{
         background: {metric_bg_3};
-        animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.7s infinite alternate;
+        animation: bb-fade-rise 0.65s ease both, bb-bg-fade 5.0s ease-in-out 0.75s infinite alternate;
       }}
       [data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{
-        animation: bb-fade-rise 0.7s ease both;
+        animation: bb-fade-rise 0.82s ease both;
         background: {card};
         border-radius: 16px;
       }}
@@ -177,7 +177,7 @@ st.markdown(
         box-shadow: none;
       }}
       [data-testid="stPlotlyChart"] {{
-        animation-delay: 0.08s;
+        animation-delay: 0.15s;
       }}
       @keyframes bb-fade-rise {{
         from {{
