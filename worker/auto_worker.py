@@ -1,8 +1,8 @@
+
 from src.db import get_connection, init_db
-import time
 from src.advisor import run_top20_cycle
 
-# Ensure tables exist in PostgreSQL
+# Initialize DB (safe to call multiple times)
 init_db()
 
 def save(history, transactions):
@@ -28,11 +28,9 @@ def save(history, transactions):
     conn.close()
 
 
-print("Autonomous Worker Running (PostgreSQL Mode)...")
+print("GitHub Actions worker starting one execution cycle...")
 
-while True:
-    history, transactions = run_top20_cycle()
-    save(history, transactions)
+history, transactions = run_top20_cycle()
+save(history, transactions)
 
-    print("Cycle complete. Sleeping 1 hour...")
-    time.sleep(3600)
+print("Cycle complete.")
