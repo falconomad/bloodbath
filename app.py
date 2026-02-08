@@ -1,4 +1,6 @@
 
+from worker.setup_db import init_db
+init_db()
 import streamlit as st
 import sqlite3
 import pandas as pd
