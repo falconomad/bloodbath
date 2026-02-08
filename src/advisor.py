@@ -48,6 +48,7 @@ def generate_recommendation(ticker):
         "trend": trend,
         "sentiment": sentiment,
         "event_detected": event_flag,
+        "composite_score": round(score, 4),
         "decision": decision,
         "confidence": round(confidence, 2),
         "data": data
@@ -118,7 +119,7 @@ def run_top20_cycle():
         analyses.append({
             "ticker": ticker,
             "decision": rec["decision"],
-            "score": rec["sentiment"],
+            "score": rec["composite_score"],
             "price": price
         })
 
