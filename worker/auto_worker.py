@@ -3,7 +3,7 @@ import time
 import sqlite3
 from src.advisor import run_top20_cycle
 
-DB = "tmp/portfolio.db"
+DB = "/tmp/portfolio.db"
 
 def save(history, transactions):
     conn = sqlite3.connect(DB)
