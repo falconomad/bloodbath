@@ -88,6 +88,30 @@ class Top20ManagerTests(unittest.TestCase):
         self.assertTrue({"allocation", "pnl", "pnl_pct"}.issubset(set(snapshot.columns)))
         self.assertAlmostEqual(float(snapshot["allocation"].sum()), 1.0, places=2)
 
+    def test_stop_loss_sells_even_without_explicit_signal(self):
+        manager = Top20AutoManager(starting_capital=500, max_positions=2, max_allocation_per_position=0.6)
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.2, "price": 100.0},
+        ])
+
+        manager.step([
+            {"ticker": "AAA", "decision": "HOLD", "score": 0.0, "price": 85.0},
+        ])
+
+        self.assertNotIn("AAA", manager.holdings)
+
+    def test_take_profit_sells_when_gain_threshold_hit(self):
+        manager = Top20AutoManager(starting_capital=500, max_positions=2, max_allocation_per_position=0.6)
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.2, "price": 100.0},
+        ])
+
+        manager.step([
+            {"ticker": "AAA", "decision": "HOLD", "score": 0.0, "price": 132.0},
+        ])
+
+        self.assertNotIn("AAA", manager.holdings)
+
 
 if __name__ == "__main__":
     unittest.main()
