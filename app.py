@@ -141,10 +141,13 @@ st.markdown(
       [data-testid="stPlotlyChart"] > div,
       [data-testid="stDataFrame"] > div,
       [data-testid="stExpander"] {{
-        border: 1px solid {border};
         border-radius: 16px;
         box-shadow: 0 8px 30px rgba(18, 24, 33, 0.04);
         transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      }}
+      [data-testid="stDataFrame"] > div,
+      [data-testid="stExpander"] {{
+        border: 1px solid {border};
       }}
       [data-testid="stPlotlyChart"]:hover > div,
       [data-testid="stDataFrame"]:hover > div,
@@ -203,10 +206,85 @@ st.markdown(
         letter-spacing: -0.02em;
         font-weight: 600;
       }}
+      [data-testid="stSkeleton"] {{
+        display: none !important;
+      }}
+      .bb-skeleton-wrap {{
+        display: grid;
+        gap: 1rem;
+      }}
+      .bb-skeleton-row {{
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+      }}
+      .bb-skeleton-chart-row {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }}
+      .bb-skeleton-card {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 16px;
+        box-shadow: 0 8px 30px rgba(18, 24, 33, 0.04);
+        overflow: hidden;
+      }}
+      .bb-skeleton-metric {{
+        height: 108px;
+      }}
+      .bb-skeleton-chart {{
+        height: 360px;
+      }}
+      .bb-skeleton-table {{
+        height: 320px;
+      }}
+      .bb-skeleton-pulse {{
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.16), transparent);
+        background-size: 250% 100%;
+        animation: bb-skeleton-shimmer 1.4s ease infinite;
+      }}
+      @keyframes bb-skeleton-shimmer {{
+        0% {{ background-position: 100% 0; }}
+        100% {{ background-position: -100% 0; }}
+      }}
+      @media (max-width: 900px) {{
+        .bb-skeleton-row, .bb-skeleton-chart-row {{
+          grid-template-columns: 1fr;
+        }}
+      }}
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+def show_dashboard_skeleton():
+    st.markdown(
+        """
+        <div class="bb-skeleton-wrap">
+          <div class="bb-skeleton-row">
+            <div class="bb-skeleton-card bb-skeleton-metric"><div class="bb-skeleton-pulse"></div></div>
+            <div class="bb-skeleton-card bb-skeleton-metric"><div class="bb-skeleton-pulse"></div></div>
+            <div class="bb-skeleton-card bb-skeleton-metric"><div class="bb-skeleton-pulse"></div></div>
+          </div>
+          <div class="bb-skeleton-card bb-skeleton-chart"><div class="bb-skeleton-pulse"></div></div>
+          <div class="bb-skeleton-chart-row">
+            <div class="bb-skeleton-card bb-skeleton-chart"><div class="bb-skeleton-pulse"></div></div>
+            <div class="bb-skeleton-card bb-skeleton-chart"><div class="bb-skeleton-pulse"></div></div>
+          </div>
+          <div class="bb-skeleton-card bb-skeleton-table"><div class="bb-skeleton-pulse"></div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+skeleton_placeholder = st.empty()
+with skeleton_placeholder.container():
+    show_dashboard_skeleton()
 
 db_ready = True
 try:
@@ -241,6 +319,8 @@ else:
     transactions = pd.DataFrame()
     positions = pd.DataFrame()
 
+skeleton_placeholder.empty()
+
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
     start = float(portfolio["value"].iloc[0])
@@ -259,7 +339,7 @@ if not portfolio.empty:
         template=plot_template,
     )
     growth_fig.update_traces(line_color=accent, fillcolor=accent_soft)
-    growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=card, plot_bgcolor=card)
+    growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
     st.plotly_chart(growth_fig, use_container_width=True)
 else:
     st.info("No portfolio data yet — worker has not run.")
