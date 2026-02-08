@@ -90,6 +90,19 @@ st.markdown(
         padding: 10px 16px;
         animation: bb-fade-rise 0.55s ease both;
       }}
+      /* Portfolio metric cards (first row, 3 columns) */
+      [data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] {{
+        background: #fff4e4;
+        animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.2s infinite alternate;
+      }}
+      [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetric"] {{
+        background: #e1ffea;
+        animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.45s infinite alternate;
+      }}
+      [data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stMetric"] {{
+        background: #f4e1ee;
+        animation: bb-fade-rise 0.55s ease both, bb-bg-fade 4.4s ease-in-out 0.7s infinite alternate;
+      }}
       [data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{
         animation: bb-fade-rise 0.7s ease both;
       }}
@@ -106,6 +119,14 @@ st.markdown(
           opacity: 1;
           transform: translateY(0);
           filter: blur(0);
+        }}
+      }}
+      @keyframes bb-bg-fade {{
+        from {{
+          filter: saturate(1) brightness(1);
+        }}
+        to {{
+          filter: saturate(1.06) brightness(0.97);
         }}
       }}
       h2, h3 {{
