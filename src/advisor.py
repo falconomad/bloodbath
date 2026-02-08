@@ -179,7 +179,7 @@ def run_top20_cycle():
     candidates = _build_candidate_list()
 
     for ticker, meta in candidates.items():
-        data = meta["data"] or get_price_data(ticker, period="6mo", interval="1d")
+        data = meta["data"] if meta["data"] is not None else get_price_data(ticker, period="6mo", interval="1d")
         if data.empty:
             continue
 
