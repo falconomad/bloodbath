@@ -1,3 +1,10 @@
+from pathlib import Path
+import sys
+
+# Ensure repo root is on sys.path when running as `python worker/auto_worker.py`.
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.db import get_connection, init_db
 from src.advisor import run_top20_cycle
