@@ -1,4 +1,4 @@
-from src.api.data_fetcher import get_bulk_price_data, get_price_data, get_company_news
+from src.api.data_fetcher import get_bulk_price_data, get_company_news, get_earnings_calendar, get_price_data
 from src.analysis.sentiment import analyze_news_sentiment
 from src.analysis.technicals import calculate_technicals
 from src.analysis.events import score_events
@@ -33,15 +33,20 @@ def generate_recommendation(ticker, price_data=None, news=None):
     data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
     headlines = _safe_news(news if news is not None else get_company_news(ticker))
+
     sentiment = float(analyze_news_sentiment(headlines)) if headlines else 0.0
-    event_score = float(score_events(headlines))
+
+    earnings = get_earnings_calendar(ticker)
+    has_upcoming_earnings = len(earnings) > 0
+
+    event_score = float(score_events(headlines, has_upcoming_earnings=has_upcoming_earnings))
     event_flag = event_score != 0.0
 
     trend_score = _trend_to_score(trend)
 
     # Adaptive blend: de-emphasize news when no useful headlines are available.
     news_weight = 0.45 if headlines else 0.2
-    event_weight = 0.25 if headlines else 0.1
+    event_weight = 0.25 if (headlines or has_upcoming_earnings) else 0.1
     trend_weight = 1.0 - news_weight - event_weight
 
     weighted_score = (trend_weight * trend_score) + (news_weight * sentiment) + (event_weight * event_score)
@@ -60,6 +65,7 @@ def generate_recommendation(ticker, price_data=None, news=None):
         "ticker": ticker,
         "trend": trend,
         "sentiment": sentiment,
+        "upcoming_earnings": has_upcoming_earnings,
         "event_detected": event_flag,
         "event_score": event_score,
         "composite_score": round(score, 4),
