@@ -13,15 +13,15 @@ if is_dark:
     bg = "#0f1115"
     card = "#171a21"
     border = "#232a35"
-    text_muted = "#9aa4b8"
-    pos_neg_scale = ["#ffb3ba", "#ff8c96", "#a8e6b1", "#6bcf8b"]
+    text = "#e7edf7"
+    panel = "#121722"
     plot_template = "plotly_dark"
 else:
     bg = "#f6f7fb"
     card = "#ffffff"
     border = "#e8ebf2"
-    text_muted = "#5f6b7b"
-    pos_neg_scale = ["#f6b0b0", "#ef7f8a", "#bfe8c7", "#82cfa0"]
+    text = "#1f2a44"
+    panel = "#ffffff"
     plot_template = "plotly_white"
 
 st.markdown(
@@ -29,22 +29,44 @@ st.markdown(
     <style>
       .stApp {{
         background: {bg};
+        color: {text};
+      }}
+      [data-testid="stHeader"] {{
+        background: {bg};
+        border-bottom: 1px solid {border};
+      }}
+      [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{
+        visibility: hidden;
+        height: 0;
+        position: fixed;
+      }}
+      .block-container {{
+        padding-top: 1rem;
+        max-width: 1200px;
       }}
       [data-testid="stMetric"] {{
         background: {card};
         border: 1px solid {border};
-        border-radius: 14px;
-        padding: 10px 14px;
+        border-radius: 16px;
+        padding: 10px 16px;
       }}
-      .block-container {{
-        padding-top: 1.4rem;
-      }}
-      .bb-subtle {{
-        color: {text_muted};
-        margin-top: -0.25rem;
+      .bb-topbar {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: {panel};
+        border: 1px solid {border};
+        border-radius: 16px;
+        padding: 10px 16px;
         margin-bottom: 1rem;
       }}
-      h1, h2, h3 {{
+      .bb-topbar-title {{
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }}
+      h2, h3 {{
         letter-spacing: -0.01em;
       }}
     </style>
@@ -52,12 +74,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.image("assets/bloodbath_logo.svg", width=260)
-st.title("Bloodbath")
-st.markdown(
-    '<p class="bb-subtle">Autonomous AI portfolio engine optimized for long-term capital growth.</p>',
-    unsafe_allow_html=True,
-)
+logo_col, title_col = st.columns([0.08, 0.92])
+with logo_col:
+    st.image("assets/bloodbath_logo.svg", width=58)
+with title_col:
+    st.markdown('<div class="bb-topbar"><span class="bb-topbar-title">Bloodbath</span></div>', unsafe_allow_html=True)
 
 db_ready = True
 try:
@@ -102,20 +123,20 @@ if not portfolio.empty:
     c2.metric("Net Return", f"{change_pct:+.2f}%")
     c3.metric("Tracked Cycles", f"{len(portfolio)}")
 
-    growth_fig = px.line(
+    growth_fig = px.area(
         portfolio,
         x="time",
         y="value",
-        title="Portfolio Growth Over Time",
-        markers=True,
+        title="Portfolio Growth",
         template=plot_template,
     )
-    growth_fig.update_layout(height=350)
+    growth_fig.update_traces(line_color="#f35f6d", fillcolor="rgba(243,95,109,0.18)")
+    growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=card, plot_bgcolor=card)
     st.plotly_chart(growth_fig, use_container_width=True)
 else:
     st.info("No portfolio data yet — worker has not run.")
 
-st.subheader("Current Allocation & Position Performance")
+st.subheader("Current Allocation")
 
 if not positions.empty:
     positions = positions.copy()
@@ -129,19 +150,19 @@ if not positions.empty:
             positions,
             names="ticker",
             values="market_value",
-            hole=0.48,
-            title="Fund Allocation by Ticker",
+            hole=0.52,
+            title="Allocation Mix",
             template=plot_template,
             color_discrete_sequence=[
-                "#DDEAF7",
-                "#E8E0F8",
-                "#DDF2E3",
-                "#FCE8D8",
-                "#F9DDE3",
-                "#E1ECFF",
+                "#FAD2D6",
+                "#FEE1C7",
+                "#FDECB3",
+                "#D8F0D2",
+                "#D8E9FB",
+                "#E7DDF9",
             ],
         )
-        alloc_fig.update_layout(height=360)
+        alloc_fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card)
         st.plotly_chart(alloc_fig, use_container_width=True)
 
     with viz_col2:
@@ -152,9 +173,9 @@ if not positions.empty:
             color="pnl_pct_display",
             title="Position P/L %",
             template=plot_template,
-            color_continuous_scale=pos_neg_scale,
+            color_continuous_scale=["#f5b6be", "#f7d8dc", "#d5edd9", "#9fd9ad"],
         )
-        pnl_fig.update_layout(height=360, coloraxis_showscale=False)
+        pnl_fig.update_layout(height=360, coloraxis_showscale=False, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card, plot_bgcolor=card)
         st.plotly_chart(pnl_fig, use_container_width=True)
 
     clean_table = positions[
@@ -195,7 +216,7 @@ if not positions.empty:
 else:
     st.info("No open positions snapshot available yet.")
 
-with st.expander("Transaction History (expand to view)", expanded=False):
+with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
         st.dataframe(transactions, use_container_width=True)
     else:
