@@ -18,24 +18,30 @@ theme_base = st.get_option("theme.base") or "light"
 is_dark = theme_base.lower() == "dark"
 
 if is_dark:
-    bg = "#0f1115"
-    card = "#171a21"
-    border = "#232a35"
-    text = "#e7edf7"
-    panel = "#121722"
-    metric_bg_1 = "#3f372b"
-    metric_bg_2 = "#4b584f"
-    metric_bg_3 = "#413342"
+    bg = "#111317"
+    card = "#171a20"
+    border = "#282d38"
+    text = "#e8edf4"
+    panel = "#141821"
+    muted_text = "#9ca7bb"
+    accent = "#4d8dff"
+    accent_soft = "rgba(77, 141, 255, 0.15)"
+    metric_bg_1 = "#1b2333"
+    metric_bg_2 = "#1b2a2a"
+    metric_bg_3 = "#232033"
     plot_template = "plotly_dark"
 else:
-    bg = "#f6f7fb"
+    bg = "#f3f4f6"
     card = "#ffffff"
-    border = "#e8ebf2"
-    text = "#1f2a44"
+    border = "#e3e6ec"
+    text = "#141821"
     panel = "#ffffff"
-    metric_bg_1 = "#fff4e4"
-    metric_bg_2 = "#e1ffea"
-    metric_bg_3 = "#f4e1ee"
+    muted_text = "#6f7684"
+    accent = "#2f6df6"
+    accent_soft = "rgba(47, 109, 246, 0.08)"
+    metric_bg_1 = "#f7f9ff"
+    metric_bg_2 = "#f5faf8"
+    metric_bg_3 = "#f8f7ff"
     plot_template = "plotly_white"
 
 st.markdown(
@@ -44,12 +50,14 @@ st.markdown(
       html, body, [data-testid="stAppViewContainer"], .stApp {{
         background: {bg} !important;
         color: {text};
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
       }}
       [data-testid="stAppViewContainer"] > .main {{
         background: {bg} !important;
       }}
       [data-testid="stSidebar"] {{
         background: {panel} !important;
+        border-right: 1px solid {border};
       }}
       [data-testid="stHeader"] {{
         background: {bg};
@@ -59,6 +67,7 @@ st.markdown(
         position: fixed;
         top: 0;
         z-index: 1000;
+        backdrop-filter: blur(10px);
       }}
       [data-testid="stHeader"]::before {{
         content: "";
@@ -80,8 +89,8 @@ st.markdown(
         left: max(calc((100vw - 1200px) / 2 + 4.1rem), 4.1rem);
         top: 50%;
         transform: translateY(-50%);
-        font-size: 1.8rem;
-        font-weight: 700;
+        font-size: 1.62rem;
+        font-weight: 600;
         letter-spacing: -0.02em;
         color: {text};
         line-height: 1;
@@ -92,15 +101,25 @@ st.markdown(
         position: fixed;
       }}
       .block-container {{
-        padding-top: 7.1rem;
+        padding-top: 7.3rem;
         max-width: 1200px;
+      }}
+      [data-testid="stMetricLabel"], .stMarkdown p {{
+        color: {muted_text};
       }}
       [data-testid="stMetric"] {{
         background: {card};
         border: 1px solid {border};
         border-radius: 16px;
-        padding: 10px 16px;
+        box-shadow: 0 8px 30px rgba(18, 24, 33, 0.04);
+        padding: 12px 16px;
         animation: bb-fade-rise 0.55s ease both;
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+      }}
+      [data-testid="stMetric"]:hover {{
+        transform: translateY(-2px);
+        border-color: {accent};
+        box-shadow: 0 14px 28px rgba(18, 24, 33, 0.09);
       }}
       /* Portfolio metric cards (first row, 3 columns) */
       [data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] {{
@@ -117,6 +136,47 @@ st.markdown(
       }}
       [data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{
         animation: bb-fade-rise 0.7s ease both;
+        background: {card};
+        border-radius: 16px;
+      }}
+      [data-testid="stPlotlyChart"] > div,
+      [data-testid="stDataFrame"] > div,
+      [data-testid="stExpander"] {{
+        border: 1px solid {border};
+        border-radius: 16px;
+        box-shadow: 0 8px 30px rgba(18, 24, 33, 0.04);
+        transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      }}
+      [data-testid="stPlotlyChart"]:hover > div,
+      [data-testid="stDataFrame"]:hover > div,
+      [data-testid="stExpander"]:hover {{
+        border-color: {accent};
+        box-shadow: 0 14px 28px rgba(18, 24, 33, 0.08);
+      }}
+      .stDataFrame [data-testid="stDataFrameResizable"] {{
+        border-radius: 16px;
+      }}
+      div[data-testid="stExpander"] details summary p {{
+        color: {text} !important;
+        font-weight: 500;
+      }}
+      [data-baseweb="select"] > div,
+      .stTextInput > div > div,
+      .stNumberInput > div > div {{
+        border-radius: 12px;
+        border-color: {border};
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }}
+      [data-baseweb="select"] > div:hover,
+      .stTextInput > div > div:hover,
+      .stNumberInput > div > div:hover {{
+        border-color: {accent};
+      }}
+      [data-baseweb="select"] > div:focus-within,
+      .stTextInput > div > div:focus-within,
+      .stNumberInput > div > div:focus-within {{
+        border-color: {accent};
+        box-shadow: 0 0 0 3px {accent_soft};
       }}
       [data-testid="stPlotlyChart"] {{
         animation-delay: 0.08s;
@@ -142,7 +202,8 @@ st.markdown(
         }}
       }}
       h2, h3 {{
-        letter-spacing: -0.01em;
+        letter-spacing: -0.02em;
+        font-weight: 600;
       }}
     </style>
     """,
@@ -199,7 +260,7 @@ if not portfolio.empty:
         title="Portfolio Growth",
         template=plot_template,
     )
-    growth_fig.update_traces(line_color="#f35f6d", fillcolor="rgba(243,95,109,0.18)")
+    growth_fig.update_traces(line_color=accent, fillcolor=accent_soft)
     growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=card, plot_bgcolor=card)
     st.plotly_chart(growth_fig, use_container_width=True)
 else:
@@ -223,12 +284,12 @@ if not positions.empty:
             title="Allocation Mix",
             template=plot_template,
             color_discrete_sequence=[
-                "#FAD2D6",
-                "#FEE1C7",
-                "#FDECB3",
-                "#D8F0D2",
-                "#D8E9FB",
-                "#E7DDF9",
+                "#c8dbff",
+                "#d4e3ff",
+                "#dae8ff",
+                "#e3edff",
+                "#eaf2ff",
+                "#f2f6ff",
             ],
         )
         alloc_fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card)
@@ -242,7 +303,7 @@ if not positions.empty:
             color="pnl_pct_display",
             title="Position P/L %",
             template=plot_template,
-            color_continuous_scale=["#f5b6be", "#f7d8dc", "#d5edd9", "#9fd9ad"],
+            color_continuous_scale=["#d4def7", "#c8d8fb", "#aac5fa", accent],
         )
         pnl_fig.update_layout(height=360, coloraxis_showscale=False, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card, plot_bgcolor=card)
         st.plotly_chart(pnl_fig, use_container_width=True)
