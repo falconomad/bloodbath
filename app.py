@@ -52,9 +52,9 @@ st.markdown(
         content: "";
         position: absolute;
         left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
-        top: 50%;
-        width: 2.5rem;
-        height: 2.5rem;
+        top: 54%;
+        width: 10rem;
+        height: 2.7rem;
         transform: translateY(-50%);
         border-radius: 0.6rem;
         background-image: url('{logo_uri}');
