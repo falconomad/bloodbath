@@ -3,7 +3,9 @@ name: AI Fund Manager Worker
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Run every 10 minutes on weekdays during the broad US market window in UTC.
+    # `worker/auto_worker.py` still enforces the exact open/close window (incl. DST).
+    - cron: "*/10 13-21 * * 1-5"
   workflow_dispatch:
 
 jobs:

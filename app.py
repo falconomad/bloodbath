@@ -6,9 +6,58 @@ from src.db import get_connection, init_db
 
 st.set_page_config(page_title="Bloodbath", page_icon="🩸", layout="wide")
 
-st.image("assets/bloodbath_logo.svg", width=420)
+theme_base = st.get_option("theme.base") or "light"
+is_dark = theme_base.lower() == "dark"
+
+if is_dark:
+    bg = "#0f1115"
+    card = "#171a21"
+    border = "#232a35"
+    text_muted = "#9aa4b8"
+    pos_neg_scale = ["#ffb3ba", "#ff8c96", "#a8e6b1", "#6bcf8b"]
+    plot_template = "plotly_dark"
+else:
+    bg = "#f6f7fb"
+    card = "#ffffff"
+    border = "#e8ebf2"
+    text_muted = "#5f6b7b"
+    pos_neg_scale = ["#f6b0b0", "#ef7f8a", "#bfe8c7", "#82cfa0"]
+    plot_template = "plotly_white"
+
+st.markdown(
+    f"""
+    <style>
+      .stApp {{
+        background: {bg};
+      }}
+      [data-testid="stMetric"] {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 14px;
+        padding: 10px 14px;
+      }}
+      .block-container {{
+        padding-top: 1.4rem;
+      }}
+      .bb-subtle {{
+        color: {text_muted};
+        margin-top: -0.25rem;
+        margin-bottom: 1rem;
+      }}
+      h1, h2, h3 {{
+        letter-spacing: -0.01em;
+      }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.image("assets/bloodbath_logo.svg", width=260)
 st.title("Bloodbath")
-st.caption("Autonomous AI portfolio engine optimized for long-term capital growth.")
+st.markdown(
+    '<p class="bb-subtle">Autonomous AI portfolio engine optimized for long-term capital growth.</p>',
+    unsafe_allow_html=True,
+)
 
 db_ready = True
 try:
@@ -59,6 +108,7 @@ if not portfolio.empty:
         y="value",
         title="Portfolio Growth Over Time",
         markers=True,
+        template=plot_template,
     )
     growth_fig.update_layout(height=350)
     st.plotly_chart(growth_fig, use_container_width=True)
@@ -79,8 +129,17 @@ if not positions.empty:
             positions,
             names="ticker",
             values="market_value",
-            hole=0.45,
+            hole=0.48,
             title="Fund Allocation by Ticker",
+            template=plot_template,
+            color_discrete_sequence=[
+                "#DDEAF7",
+                "#E8E0F8",
+                "#DDF2E3",
+                "#FCE8D8",
+                "#F9DDE3",
+                "#E1ECFF",
+            ],
         )
         alloc_fig.update_layout(height=360)
         st.plotly_chart(alloc_fig, use_container_width=True)
@@ -92,7 +151,8 @@ if not positions.empty:
             y="pnl_pct_display",
             color="pnl_pct_display",
             title="Position P/L %",
-            color_continuous_scale=["#a30000", "#ff6666", "#6fdc8c", "#188038"],
+            template=plot_template,
+            color_continuous_scale=pos_neg_scale,
         )
         pnl_fig.update_layout(height=360, coloraxis_showscale=False)
         st.plotly_chart(pnl_fig, use_container_width=True)
