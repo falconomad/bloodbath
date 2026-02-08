@@ -1,4 +1,3 @@
-
 streamlit
 yfinance
 pandas
@@ -9,3 +8,4 @@ requests
 plotly
 python-dotenv
 finnhub-python
+psycopg2-binary
