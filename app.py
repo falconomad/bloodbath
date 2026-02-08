@@ -321,6 +321,35 @@ else:
 
 skeleton_placeholder.empty()
 
+with st.sidebar:
+    st.subheader("At-a-Glance")
+
+    st.markdown("**Current Allocation**")
+    if not positions.empty:
+        sidebar_alloc = positions[["ticker", "allocation"]].copy()
+        sidebar_alloc["allocation"] = sidebar_alloc["allocation"] * 100
+        st.dataframe(
+            sidebar_alloc.rename(columns={"allocation": "allocation(%)"}).style.format(
+                {"allocation(%)": "{:.2f}"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No current allocation data.")
+
+    st.markdown("**Recent Transactions**")
+    if not transactions.empty:
+        sidebar_tx = transactions.sort_values("time", ascending=False).head(8)
+        tx_cols = [
+            col
+            for col in ["time", "ticker", "action", "shares", "price", "value"]
+            if col in sidebar_tx.columns
+        ]
+        st.dataframe(sidebar_tx[tx_cols], use_container_width=True, hide_index=True)
+    else:
+        st.caption("No transaction history yet.")
+
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
     start = float(portfolio["value"].iloc[0])
