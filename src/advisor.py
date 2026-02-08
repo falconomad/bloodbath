@@ -15,19 +15,36 @@ def _clamp(value, min_v, max_v):
     return max(min(value, max_v), min_v)
 
 
+def _trend_to_score(trend):
+    if trend == "BULLISH":
+        return 1.0
+    if trend == "BEARISH":
+        return -1.0
+    return 0.0
+
+
+def _safe_news(news):
+    if not news:
+        return []
+    return [n for n in news if isinstance(n, str) and n.strip()]
+
+
 def generate_recommendation(ticker, price_data=None, news=None):
     data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
-    headlines = news if news is not None else get_company_news(ticker)
-    sentiment = float(analyze_news_sentiment(headlines))
+    headlines = _safe_news(news if news is not None else get_company_news(ticker))
+    sentiment = float(analyze_news_sentiment(headlines)) if headlines else 0.0
     event_score = float(score_events(headlines))
     event_flag = event_score != 0.0
 
-    trend_score = 1.0 if trend == "BULLISH" else -1.0
+    trend_score = _trend_to_score(trend)
 
-    # Weighted composite gives higher influence to trend persistence and events,
-    # while still incorporating model sentiment output.
-    weighted_score = (0.5 * trend_score) + (0.3 * sentiment) + (0.2 * event_score)
+    # Adaptive blend: de-emphasize news when no useful headlines are available.
+    news_weight = 0.45 if headlines else 0.2
+    event_weight = 0.25 if headlines else 0.1
+    trend_weight = 1.0 - news_weight - event_weight
+
+    weighted_score = (trend_weight * trend_score) + (news_weight * sentiment) + (event_weight * event_score)
     score = _clamp(weighted_score * 2.0, -2.0, 2.0)
 
     if score >= 0.7:
