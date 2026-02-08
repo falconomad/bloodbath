@@ -1,10 +1,19 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
+import base64
+from pathlib import Path
 
 from src.db import get_connection, init_db
 
 st.set_page_config(page_title="Bloodbath", page_icon="🩸", layout="wide")
+
+logo_path = Path("assets/bloodbath_logo.svg")
+logo_uri = ""
+if logo_path.exists():
+    logo_bytes = logo_path.read_bytes()
+    logo_uri = f"data:image/svg+xml;base64,{base64.b64encode(logo_bytes).decode('utf-8')}"
 
 theme_base = st.get_option("theme.base") or "light"
 is_dark = theme_base.lower() == "dark"
@@ -34,6 +43,8 @@ st.markdown(
       [data-testid="stHeader"] {{
         background: {bg};
         border-bottom: 1px solid {border};
+        height: 4.25rem;
+        min-height: 4.25rem;
       }}
       [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{
         visibility: hidden;
@@ -44,26 +55,30 @@ st.markdown(
         padding-top: 1rem;
         max-width: 1200px;
       }}
+      [data-testid="stHeader"] .bb-header-slot {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: min(1200px, calc(100% - 2rem));
+        margin: 0 auto;
+        color: {text};
+      }}
       [data-testid="stMetric"] {{
         background: {card};
         border: 1px solid {border};
         border-radius: 16px;
         padding: 10px 16px;
       }}
-      .bb-topbar {{
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        background: {panel};
-        border: 1px solid {border};
-        border-radius: 16px;
-        padding: 10px 16px;
-        margin-bottom: 1rem;
+      .bb-logo {{
+        width: 40px;
+        height: 40px;
+        object-fit: contain;
+        display: block;
       }}
       .bb-topbar-title {{
-        font-size: 2rem;
+        font-size: 1.6rem;
         font-weight: 700;
-        line-height: 1;
+        line-height: 1.1;
         letter-spacing: -0.02em;
       }}
       h2, h3 {{
@@ -74,11 +89,26 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-logo_col, title_col = st.columns([0.08, 0.92])
-with logo_col:
-    st.image("assets/bloodbath_logo.svg", width=58)
-with title_col:
-    st.markdown('<div class="bb-topbar"><span class="bb-topbar-title">Bloodbath</span></div>', unsafe_allow_html=True)
+logo_html = f'<img src="{logo_uri}" alt="Bloodbath logo" class="bb-logo">' if logo_uri else "🩸"
+components.html(
+    f"""
+    <script>
+      const parentDoc = window.parent.document;
+      const header = parentDoc.querySelector('[data-testid="stHeader"]');
+      if (header) {{
+        let slot = parentDoc.getElementById('bb-header-slot');
+        if (!slot) {{
+          slot = parentDoc.createElement('div');
+          slot.id = 'bb-header-slot';
+          slot.className = 'bb-header-slot';
+          header.appendChild(slot);
+        }}
+        slot.innerHTML = `<span class="bb-topbar">{logo_html}</span><span class="bb-topbar-title">Bloodbath</span>`;
+      }}
+    </script>
+    """,
+    height=0,
+)
 
 db_ready = True
 try:
