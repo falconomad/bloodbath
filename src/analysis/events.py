@@ -25,23 +25,22 @@ EVENT_WEIGHTS = {
 }
 
 
-def score_events(news: Iterable[str] | None) -> float:
-    """Return weighted event score in [-1, 1] from headline text."""
-    if not news:
-        return 0.0
+def score_events(news: Iterable[str] | None, has_upcoming_earnings: bool = False) -> float:
+    """Return weighted event score in [-1, 1] from headline text and earnings context."""
+    total = 0.12 if has_upcoming_earnings else 0.0
 
-    total = 0.0
-    for headline in news:
-        if not isinstance(headline, str):
-            continue
-        text = headline.lower()
-        for phrase, weight in EVENT_WEIGHTS.items():
-            if phrase in text:
-                total += weight
+    if news:
+        for headline in news:
+            if not isinstance(headline, str):
+                continue
+            text = headline.lower()
+            for phrase, weight in EVENT_WEIGHTS.items():
+                if phrase in text:
+                    total += weight
 
     return round(max(min(total, 1.0), -1.0), 2)
 
 
-def detect_events(news: Iterable[str] | None) -> bool:
+def detect_events(news: Iterable[str] | None, has_upcoming_earnings: bool = False) -> bool:
     """Backwards-compatible boolean event detector."""
-    return score_events(news) != 0.0
+    return score_events(news, has_upcoming_earnings=has_upcoming_earnings) != 0.0

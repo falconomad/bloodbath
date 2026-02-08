@@ -20,6 +20,10 @@ class EventScoringTests(unittest.TestCase):
         self.assertEqual(score_events(bullish), 1.0)
         self.assertEqual(score_events(bearish), -1.0)
 
+    def test_score_events_includes_upcoming_earnings_signal(self):
+        self.assertEqual(score_events([], has_upcoming_earnings=True), 0.12)
+        self.assertTrue(detect_events([], has_upcoming_earnings=True))
+
     def test_score_events_handles_empty_partial_and_non_string_items(self):
         headlines = ["", None, 123, "minor product launch"]
 
