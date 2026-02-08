@@ -1,7 +1,7 @@
 
 import sqlite3
 
-conn = sqlite3.connect('db/portfolio.db')
+conn = sqlite3.connect('tmp/portfolio.db')
 c = conn.cursor()
 
 c.execute('CREATE TABLE IF NOT EXISTS portfolio (time TEXT, value REAL)')
