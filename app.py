@@ -35,9 +35,15 @@ else:
 st.markdown(
     f"""
     <style>
-      .stApp {{
-        background: {bg};
+      html, body, [data-testid="stAppViewContainer"], .stApp {{
+        background: {bg} !important;
         color: {text};
+      }}
+      [data-testid="stAppViewContainer"] > .main {{
+        background: {bg} !important;
+      }}
+      [data-testid="stSidebar"] {{
+        background: {panel} !important;
       }}
       [data-testid="stHeader"] {{
         background: {bg};
