@@ -141,10 +141,13 @@ st.markdown(
       [data-testid="stPlotlyChart"] > div,
       [data-testid="stDataFrame"] > div,
       [data-testid="stExpander"] {{
-        border: 1px solid {border};
         border-radius: 16px;
         box-shadow: 0 8px 30px rgba(18, 24, 33, 0.04);
         transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      }}
+      [data-testid="stDataFrame"] > div,
+      [data-testid="stExpander"] {{
+        border: 1px solid {border};
       }}
       [data-testid="stPlotlyChart"]:hover > div,
       [data-testid="stDataFrame"]:hover > div,
@@ -336,7 +339,7 @@ if not portfolio.empty:
         template=plot_template,
     )
     growth_fig.update_traces(line_color=accent, fillcolor=accent_soft)
-    growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=card, plot_bgcolor=card)
+    growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
     st.plotly_chart(growth_fig, use_container_width=True)
 else:
     st.info("No portfolio data yet — worker has not run.")
