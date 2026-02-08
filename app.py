@@ -118,7 +118,6 @@ st.markdown(
       }}
       [data-testid="stMetric"]:hover {{
         transform: translateY(-2px);
-        border-color: {accent};
         box-shadow: 0 14px 28px rgba(18, 24, 33, 0.09);
       }}
       /* Portfolio metric cards (first row, 3 columns) */
@@ -150,7 +149,6 @@ st.markdown(
       [data-testid="stPlotlyChart"]:hover > div,
       [data-testid="stDataFrame"]:hover > div,
       [data-testid="stExpander"]:hover {{
-        border-color: {accent};
         box-shadow: 0 14px 28px rgba(18, 24, 33, 0.08);
       }}
       .stDataFrame [data-testid="stDataFrameResizable"] {{
@@ -170,13 +168,13 @@ st.markdown(
       [data-baseweb="select"] > div:hover,
       .stTextInput > div > div:hover,
       .stNumberInput > div > div:hover {{
-        border-color: {accent};
+        border-color: {border};
       }}
       [data-baseweb="select"] > div:focus-within,
       .stTextInput > div > div:focus-within,
       .stNumberInput > div > div:focus-within {{
-        border-color: {accent};
-        box-shadow: 0 0 0 3px {accent_soft};
+        border-color: {border};
+        box-shadow: none;
       }}
       [data-testid="stPlotlyChart"] {{
         animation-delay: 0.08s;
