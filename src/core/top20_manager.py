@@ -7,6 +7,7 @@ class Top20AutoManager:
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
         self.max_allocation_per_position = float(max_allocation_per_position)
+        # ticker -> {"shares": int, "avg_cost": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
         self.history = []
@@ -33,11 +34,19 @@ class Top20AutoManager:
 
         cost = shares * price
         self.cash -= cost
-        self.holdings[ticker] = self.holdings.get(ticker, 0) + shares
+
+        position = self.holdings.get(ticker, {"shares": 0, "avg_cost": 0.0})
+        prev_shares = int(position["shares"])
+        prev_cost_basis = prev_shares * float(position["avg_cost"])
+        new_shares = prev_shares + shares
+        new_avg_cost = (prev_cost_basis + cost) / new_shares
+
+        self.holdings[ticker] = {"shares": new_shares, "avg_cost": new_avg_cost}
         self._record(timestamp, ticker, "BUY", shares, price)
 
     def _sell_all(self, timestamp, ticker, price):
-        shares = int(self.holdings.get(ticker, 0))
+        position = self.holdings.get(ticker, {"shares": 0})
+        shares = int(position["shares"])
         if shares <= 0:
             return
 
@@ -47,11 +56,56 @@ class Top20AutoManager:
 
     def _portfolio_value(self):
         total = self.cash
-        for ticker, shares in self.holdings.items():
+        for ticker, position in self.holdings.items():
             price = self.last_price_by_ticker.get(ticker)
             if price is not None:
-                total += shares * price
+                total += int(position["shares"]) * price
         return round(float(total), 4)
+
+    def position_snapshot_df(self, timestamp=None):
+        if not self.holdings:
+            return pd.DataFrame(
+                columns=[
+                    "time",
+                    "ticker",
+                    "shares",
+                    "avg_cost",
+                    "current_price",
+                    "market_value",
+                    "allocation",
+                    "pnl",
+                    "pnl_pct",
+                ]
+            )
+
+        snapshot_time = timestamp or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        equity = self._portfolio_value()
+        rows = []
+        for ticker, position in self.holdings.items():
+            shares = int(position["shares"])
+            avg_cost = float(position["avg_cost"])
+            current_price = float(self.last_price_by_ticker.get(ticker, avg_cost))
+            market_value = shares * current_price
+            cost_basis = shares * avg_cost
+            pnl = market_value - cost_basis
+            allocation = (market_value / equity) if equity > 0 else 0.0
+            pnl_pct = (pnl / cost_basis) if cost_basis > 0 else 0.0
+
+            rows.append(
+                {
+                    "time": snapshot_time,
+                    "ticker": ticker,
+                    "shares": shares,
+                    "avg_cost": round(avg_cost, 4),
+                    "current_price": round(current_price, 4),
+                    "market_value": round(market_value, 4),
+                    "allocation": round(allocation, 6),
+                    "pnl": round(pnl, 4),
+                    "pnl_pct": round(pnl_pct, 6),
+                }
+            )
+
+        return pd.DataFrame(rows).sort_values("market_value", ascending=False)
 
     def step(self, analyses):
         if not analyses:

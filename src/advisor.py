@@ -11,33 +11,33 @@ def _as_float(value):
     return float(value)
 
 
+def _clamp(value, min_v, max_v):
+    return max(min(value, max_v), min_v)
+
+
 def generate_recommendation(ticker, price_data=None, news=None):
     data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
     headlines = news if news is not None else get_company_news(ticker)
-    sentiment = analyze_news_sentiment(headlines)
-    event_score = score_events(headlines)
+    sentiment = float(analyze_news_sentiment(headlines))
+    event_score = float(score_events(headlines))
     event_flag = event_score != 0.0
 
-    score = 0
+    trend_score = 1.0 if trend == "BULLISH" else -1.0
 
-    if trend == "BULLISH":
-        score += 1
-    else:
-        score -= 1
+    # Weighted composite gives higher influence to trend persistence and events,
+    # while still incorporating model sentiment output.
+    weighted_score = (0.5 * trend_score) + (0.3 * sentiment) + (0.2 * event_score)
+    score = _clamp(weighted_score * 2.0, -2.0, 2.0)
 
-    score += sentiment
-
-    score += event_score
-
-    if score > 1:
+    if score >= 0.7:
         decision = "BUY"
-    elif score < -1:
+    elif score <= -0.7:
         decision = "SELL"
     else:
         decision = "HOLD"
 
-    confidence = min(abs(score) * 20, 100)
+    confidence = _clamp(abs(score) * 50, 0, 100)
 
     return {
         "ticker": ticker,
@@ -140,7 +140,13 @@ def _build_candidate_list(universe_size=120, dip_scan_size=60):
 
     for ticker in top20_set:
         if ticker not in final:
-            final[ticker] = {"data": None, "dip_score": 0.0, "drawdown": None, "stabilized": False, "volatility_penalty": 0.0}
+            final[ticker] = {
+                "data": None,
+                "dip_score": 0.0,
+                "drawdown": None,
+                "stabilized": False,
+                "volatility_penalty": 0.0,
+            }
 
     return final
 
@@ -178,4 +184,5 @@ def run_top20_cycle():
     if analyses:
         top20_manager.step(analyses)
 
-    return top20_manager.history_df(), top20_manager.transactions_df()
+    positions = top20_manager.position_snapshot_df()
+    return top20_manager.history_df(), top20_manager.transactions_df(), positions
