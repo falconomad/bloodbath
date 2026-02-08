@@ -9,10 +9,20 @@ if str(ROOT_DIR) not in sys.path:
 from src.db import get_connection, init_db
 from src.advisor import run_top20_cycle
 
+DB_AVAILABLE = True
+
 # Initialize DB (safe to call multiple times)
-init_db()
+try:
+    init_db()
+except Exception as exc:
+    DB_AVAILABLE = False
+    print(f"Database initialization failed; continuing without persistence: {exc}")
 
 def save(history, transactions):
+    if not DB_AVAILABLE:
+        print("Skipping DB save because database is unavailable.")
+        return
+
     conn = get_connection()
     c = conn.cursor()
 
