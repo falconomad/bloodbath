@@ -1,0 +1,13 @@
+
+services:
+  - name: ai-fund-dashboard
+    type: web
+    env: docker
+    plan: free
+
+  - name: ai-fund-worker
+    type: worker
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker/auto_worker.py
