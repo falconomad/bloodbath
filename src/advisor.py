@@ -1,7 +1,7 @@
 from src.api.data_fetcher import get_price_data, get_company_news
 from src.analysis.sentiment import analyze_news_sentiment
 from src.analysis.technicals import calculate_technicals
-from src.analysis.events import detect_events
+from src.analysis.events import score_events
 
 
 def _as_float(value):
@@ -15,7 +15,8 @@ def generate_recommendation(ticker, price_data=None, news=None):
     trend = calculate_technicals(data)
     headlines = news if news is not None else get_company_news(ticker)
     sentiment = analyze_news_sentiment(headlines)
-    event_flag = detect_events(headlines)
+    event_score = score_events(headlines)
+    event_flag = event_score != 0.0
 
     score = 0
 
@@ -26,8 +27,7 @@ def generate_recommendation(ticker, price_data=None, news=None):
 
     score += sentiment
 
-    if event_flag:
-        score += 0.5
+    score += event_score
 
     if score > 1:
         decision = "BUY"
@@ -43,6 +43,7 @@ def generate_recommendation(ticker, price_data=None, news=None):
         "trend": trend,
         "sentiment": sentiment,
         "event_detected": event_flag,
+        "event_score": event_score,
         "composite_score": round(score, 4),
         "decision": decision,
         "confidence": round(confidence, 2),
