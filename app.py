@@ -518,21 +518,42 @@ if not positions.empty:
         st.plotly_chart(alloc_fig, use_container_width=True)
 
     with viz_col2:
+        pnl_view = positions.sort_values("pnl_pct_display", ascending=False).copy()
+        pnl_view["abs_pnl_pct"] = pnl_view["pnl_pct_display"].abs()
         pnl_fig = px.bar(
-            positions,
+            pnl_view,
             x="ticker",
             y="pnl_pct_display",
-            color="pnl_pct_display",
+            color="abs_pnl_pct",
             title="Position P/L %",
             template=plot_template,
-            color_continuous_midpoint=0,
             color_continuous_scale=[
                 [0.0, down_color],
                 [0.5, "#bfc7d6" if is_dark else "#cfd6e2"],
                 [1.0, up_color],
             ],
         )
-        pnl_fig.update_layout(height=360, coloraxis_showscale=False, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card, plot_bgcolor=card)
+        pnl_fig.update_traces(
+            marker_line_width=0,
+            hovertemplate="<b>%{x}</b><br>P/L: %{y:.2f}%<extra></extra>",
+        )
+        pnl_fig.update_layout(
+            height=360,
+            coloraxis_showscale=False,
+            margin=dict(l=10, r=10, t=50, b=20),
+            paper_bgcolor=card,
+            plot_bgcolor=card,
+            bargap=0.35,
+            xaxis=dict(title="", showgrid=False, tickfont=dict(size=12)),
+            yaxis=dict(
+                title="",
+                ticksuffix="%",
+                gridcolor=border,
+                zeroline=True,
+                zerolinecolor=text,
+                zerolinewidth=1.5,
+            ),
+        )
         st.plotly_chart(pnl_fig, use_container_width=True)
 
     clean_table = positions[
