@@ -101,6 +101,26 @@ class DataSourceTests(unittest.TestCase):
         called_url = mock_requests_get.call_args.args[0]
         self.assertIn("/stocks/BRK.B/bars", called_url)
 
+    @patch("src.api.data_fetcher.ALPACA_API_SECRET", "secret")
+    @patch("src.api.data_fetcher.ALPACA_API_KEY", "key")
+    @patch("src.api.data_fetcher.requests.get")
+    def test_alpaca_snapshot_features_parsing(self, mock_requests_get):
+        mock_response = unittest.mock.Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "latestQuote": {"bp": 100.0, "ap": 100.2},
+            "dailyBar": {"o": 99.0, "c": 100.0, "v": 150000},
+            "prevDailyBar": {"v": 100000},
+        }
+        mock_requests_get.return_value = mock_response
+
+        features = data_fetcher.get_alpaca_snapshot_features("AAPL")
+
+        self.assertTrue(features["available"])
+        self.assertGreater(features["spread_bps"], 0)
+        self.assertGreater(features["rel_volume"], 1.0)
+        self.assertGreaterEqual(features["quality"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

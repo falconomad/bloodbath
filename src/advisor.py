@@ -1,4 +1,10 @@
-from src.api.data_fetcher import get_bulk_price_data, get_company_news, get_earnings_calendar, get_price_data
+from src.api.data_fetcher import (
+    get_bulk_price_data,
+    get_company_news,
+    get_earnings_calendar,
+    get_price_data,
+    get_alpaca_snapshot_features,
+)
 from src.analysis.sentiment import analyze_news_sentiment
 from src.analysis.technicals import calculate_technicals
 from src.analysis.events import score_events
@@ -124,20 +130,32 @@ def generate_recommendation(ticker, price_data=None, news=None):
 
     event_score = float(score_events(headlines, has_upcoming_earnings=has_upcoming_earnings))
     event_flag = event_score != 0.0
+    micro = get_alpaca_snapshot_features(ticker)
 
     trend_score = _trend_to_score(trend)
 
     news_quality = _news_quality_factor(headlines)
     tech_quality = _technical_quality_factor(data)
     agreement_conf = _agreement_confidence(trend_score, sentiment, event_score)
-    signal_confidence = max(min((0.35 * news_quality) + (0.35 * tech_quality) + (0.30 * agreement_conf), 1.0), 0.0)
+    micro_quality = float(micro.get("quality", 0.0)) if micro.get("available", False) else 0.5
+    signal_confidence = max(
+        min((0.30 * news_quality) + (0.30 * tech_quality) + (0.25 * agreement_conf) + (0.15 * micro_quality), 1.0), 0.0
+    )
 
     # Adaptive blend: de-emphasize news when no useful headlines are available.
     news_weight = (0.45 if headlines else 0.2) * news_quality
-    event_weight = 0.25 if (headlines or has_upcoming_earnings) else 0.1
-    trend_weight = max(0.1, 1.0 - news_weight - event_weight)
+    event_weight = 0.20 if (headlines or has_upcoming_earnings) else 0.1
+    micro_weight = 0.15 if micro.get("available", False) else 0.0
+    trend_weight = max(0.1, 1.0 - news_weight - event_weight - micro_weight)
 
-    weighted_score = (trend_weight * trend_score) + (news_weight * sentiment) + (event_weight * event_score)
+    micro_signal = (0.6 * float(micro.get("intraday_return", 0.0))) + (0.4 * (float(micro.get("rel_volume", 1.0)) - 1.0))
+    micro_signal = _clamp(micro_signal * 2.0, -1.0, 1.0)
+    weighted_score = (
+        (trend_weight * trend_score)
+        + (news_weight * sentiment)
+        + (event_weight * event_score)
+        + (micro_weight * micro_signal)
+    )
     score = _clamp(weighted_score * 2.0, -2.0, 2.0)
 
     if score >= RECOMMENDATION_DECISION_THRESHOLD:
@@ -156,6 +174,7 @@ def generate_recommendation(ticker, price_data=None, news=None):
         "signal_confidence": round(signal_confidence, 4),
         "news_quality": round(news_quality, 4),
         "technical_quality": round(tech_quality, 4),
+        "micro_quality": round(micro_quality, 4),
         "upcoming_earnings": has_upcoming_earnings,
         "event_detected": event_flag,
         "event_score": event_score,

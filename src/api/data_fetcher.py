@@ -34,6 +34,7 @@ _finnhub_error_logged = False
 _alpaca_status_logged = False
 _alpaca_rate_limit_logged = False
 _alpaca_error_logged = False
+_alpaca_snapshot_logged = False
 
 
 def _cache_dir():
@@ -270,6 +271,61 @@ def _get_price_data_from_alpaca(ticker, period="6mo", interval="1d"):
     if not frame.empty:
         print(f"[data] {ticker}: alpaca rows={len(frame)}")
     return frame
+
+
+def get_alpaca_snapshot_features(ticker):
+    global _alpaca_snapshot_logged
+    if not ALPACA_API_KEY or not ALPACA_API_SECRET:
+        return {"available": False, "spread_bps": 0.0, "intraday_return": 0.0, "rel_volume": 1.0, "quality": 0.0}
+
+    symbol = _alpaca_symbol(ticker)
+    url = f"{_normalized_alpaca_base_url()}/stocks/{symbol}/snapshot"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+    }
+    params = {"feed": "iex"}
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        payload = response.json() if isinstance(response.json(), dict) else {}
+    except Exception:
+        return {"available": False, "spread_bps": 0.0, "intraday_return": 0.0, "rel_volume": 1.0, "quality": 0.0}
+
+    if not _alpaca_snapshot_logged:
+        print("[data] alpaca snapshot features enabled")
+        _alpaca_snapshot_logged = True
+
+    latest_quote = payload.get("latestQuote", {}) if isinstance(payload, dict) else {}
+    daily_bar = payload.get("dailyBar", {}) if isinstance(payload, dict) else {}
+    prev_daily_bar = payload.get("prevDailyBar", {}) if isinstance(payload, dict) else {}
+
+    ask = float(latest_quote.get("ap", 0.0) or 0.0)
+    bid = float(latest_quote.get("bp", 0.0) or 0.0)
+    mid = (ask + bid) / 2.0 if (ask > 0 and bid > 0) else 0.0
+    spread_bps = ((ask - bid) / mid) * 10_000.0 if mid > 0 and ask >= bid else 0.0
+
+    open_p = float(daily_bar.get("o", 0.0) or 0.0)
+    close_p = float(daily_bar.get("c", 0.0) or 0.0)
+    intraday_return = ((close_p - open_p) / open_p) if open_p > 0 else 0.0
+
+    today_v = float(daily_bar.get("v", 0.0) or 0.0)
+    prev_v = float(prev_daily_bar.get("v", 0.0) or 0.0)
+    rel_volume = (today_v / prev_v) if prev_v > 0 else 1.0
+
+    # Higher quality when spreads are tighter and volumes are healthy.
+    spread_quality = max(0.0, min(1.0, 1.0 - (spread_bps / 80.0)))
+    vol_quality = max(0.0, min(1.0, rel_volume / 1.5))
+    quality = (0.65 * spread_quality) + (0.35 * vol_quality)
+
+    return {
+        "available": True,
+        "spread_bps": round(spread_bps, 4),
+        "intraday_return": round(intraday_return, 5),
+        "rel_volume": round(rel_volume, 4),
+        "quality": round(float(quality), 4),
+    }
 
 
 def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
