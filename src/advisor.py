@@ -290,6 +290,7 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
 def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, cycle_idx=0, apply_stability_gate=False):
     data = price_data if price_data is not None else get_price_data(ticker)
     headlines = _safe_news(news if news is not None else get_company_news(ticker))
+    price = _as_float(data["Close"].iloc[-1]) if data is not None and not data.empty and "Close" in data else 0.0
     trend, has_upcoming_earnings, signals, risk_context = _normalized_module_signals(
         ticker=ticker, data=data, headlines=headlines, dip_meta=dip_meta
     )
@@ -320,6 +321,7 @@ def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, c
     write_trace(
         {
             "ticker": ticker,
+            "price": round(price, 6),
             "score": round(score, 6),
             "confidence": round(signal_confidence, 6),
             "decision": decision,
