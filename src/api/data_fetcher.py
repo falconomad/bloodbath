@@ -17,6 +17,7 @@ ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY") or os.getenv("ALPHA_VANTAGE
 ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
+_alpha_status_logged = False
 
 
 def _cache_dir():
@@ -92,8 +93,15 @@ def _trim_period(frame, period):
 
 
 def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=3):
+    global _alpha_status_logged
     if not ALPHAVANTAGE_KEY:
+        if not _alpha_status_logged:
+            print("[data] alpha fallback disabled (missing ALPHAVANTAGE_API_KEY / ALPHA_VANTAGE_API_KEY)")
+            _alpha_status_logged = True
         return pd.DataFrame()
+    if not _alpha_status_logged:
+        print("[data] alpha fallback enabled")
+        _alpha_status_logged = True
     if interval != "1d":
         print(f"[data] {ticker}: alpha fallback skipped (unsupported interval={interval})")
         return pd.DataFrame()
