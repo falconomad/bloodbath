@@ -78,14 +78,18 @@ class Top20AutoManager:
             return 0.0
 
         exec_price = float(price) * (1.0 + (self.slippage_bps / 10_000.0))
-        shares = min(budget, self.cash) / exec_price
+        fee_rate = self.fee_bps / 10_000.0
+        # Ensure budget check includes fees so cash cannot go negative from execution costs.
+        shares = min(budget, self.cash) / (exec_price * (1.0 + fee_rate))
         if shares <= 0 or shares < 1e-6:
             return 0.0
 
         notional = shares * exec_price
-        fee = notional * (self.fee_bps / 10_000.0)
+        fee = notional * fee_rate
         total_cost = notional + fee
         self.cash -= total_cost
+        if self.cash < 0 and abs(self.cash) < 1e-6:
+            self.cash = 0.0
 
         position = self.holdings.get(ticker, {"shares": 0, "avg_cost": 0.0, "peak_price": float(price)})
         prev_shares = float(position["shares"])

@@ -11,6 +11,7 @@ class Top20ManagerTests(unittest.TestCase):
             max_allocation_per_position=1.0,
             slippage_bps=0.0,
             fee_bps=0.0,
+            sell_confirm_steps=1,
         )
         with_cost = Top20AutoManager(
             starting_capital=1000,
@@ -18,6 +19,7 @@ class Top20ManagerTests(unittest.TestCase):
             max_allocation_per_position=1.0,
             slippage_bps=20.0,
             fee_bps=10.0,
+            sell_confirm_steps=1,
         )
 
         buy = [{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0}]
