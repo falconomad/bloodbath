@@ -345,9 +345,9 @@ def _signed_bar_hex(v, max_abs):
     strength = min(abs(n) / max_abs, 1.0)
     if n >= 0:
         # Higher gains -> darker green.
-        return "#22C55E" if strength < 0.35 else ("#16A34A" if strength < 0.7 else "#166534")
+        return "#1E7A46" if strength < 0.35 else ("#165C35" if strength < 0.7 else "#0F3D24")
     # Higher losses -> darker red.
-    return "#F87171" if strength < 0.35 else ("#EF4444" if strength < 0.7 else "#991B1B")
+    return "#A14A4A" if strength < 0.35 else ("#7A3434" if strength < 0.7 else "#4D1F1F")
 
 
 skeleton_placeholder = st.empty()
