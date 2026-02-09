@@ -4,6 +4,32 @@ from src.core.top20_manager import Top20AutoManager
 
 
 class Top20ManagerTests(unittest.TestCase):
+    def test_execution_costs_reduce_realized_performance(self):
+        no_cost = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            slippage_bps=0.0,
+            fee_bps=0.0,
+        )
+        with_cost = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            slippage_bps=20.0,
+            fee_bps=10.0,
+        )
+
+        buy = [{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0}]
+        sell = [{"ticker": "AAA", "decision": "SELL", "score": -2.0, "price": 110.0}]
+
+        no_cost.step(buy)
+        no_cost.step(sell)
+        with_cost.step(buy)
+        with_cost.step(sell)
+
+        self.assertGreater(no_cost.cash, with_cost.cash)
+
     def test_allocates_across_multiple_buy_candidates(self):
         manager = Top20AutoManager(starting_capital=500, max_positions=3, max_allocation_per_position=0.5)
 

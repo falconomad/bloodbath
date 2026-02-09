@@ -50,6 +50,8 @@ RECOMMENDATION_DECISION_THRESHOLD = _float_from_env(
 
 # Trading engine knobs.
 TOP20_MIN_BUY_SCORE = _float_from_env("TOP20_MIN_BUY_SCORE", 0.75 if TRADE_MODE == "NORMAL" else 0.45)
+TOP20_SLIPPAGE_BPS = _float_from_env("TOP20_SLIPPAGE_BPS", 5.0)
+TOP20_FEE_BPS = _float_from_env("TOP20_FEE_BPS", 1.0)
 
 # Fetch pacing for free-tier data providers.
 FETCH_BATCH_SIZE = _int_from_env("FETCH_BATCH_SIZE", 20)

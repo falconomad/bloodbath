@@ -14,6 +14,8 @@ class Top20AutoManager:
         min_buy_score=0.75,
         cooldown_after_sell_steps=1,
         max_new_exposure_per_step=1.0,
+        slippage_bps=0.0,
+        fee_bps=0.0,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
@@ -23,6 +25,8 @@ class Top20AutoManager:
         self.min_buy_score = float(min_buy_score)
         self.cooldown_after_sell_steps = int(cooldown_after_sell_steps)
         self.max_new_exposure_per_step = float(max_new_exposure_per_step)
+        self.slippage_bps = float(slippage_bps)
+        self.fee_bps = float(fee_bps)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
@@ -59,27 +63,30 @@ class Top20AutoManager:
         if not self._is_valid_price(price) or budget <= 0 or self.cash <= 0:
             return 0.0
 
-        shares = min(budget, self.cash) / price
+        exec_price = float(price) * (1.0 + (self.slippage_bps / 10_000.0))
+        shares = min(budget, self.cash) / exec_price
         if shares <= 0 or shares < 1e-6:
             return 0.0
 
-        cost = shares * price
-        self.cash -= cost
+        notional = shares * exec_price
+        fee = notional * (self.fee_bps / 10_000.0)
+        total_cost = notional + fee
+        self.cash -= total_cost
 
         position = self.holdings.get(ticker, {"shares": 0, "avg_cost": 0.0, "peak_price": float(price)})
         prev_shares = float(position["shares"])
         prev_cost_basis = prev_shares * float(position["avg_cost"])
         new_shares = prev_shares + shares
-        new_avg_cost = (prev_cost_basis + cost) / new_shares
-        new_peak = max(float(position.get("peak_price", price)), float(price))
+        new_avg_cost = (prev_cost_basis + total_cost) / new_shares
+        new_peak = max(float(position.get("peak_price", exec_price)), float(exec_price))
 
         self.holdings[ticker] = {
             "shares": new_shares,
             "avg_cost": new_avg_cost,
             "peak_price": new_peak,
         }
-        self._record(timestamp, ticker, "BUY", shares, price)
-        return cost
+        self._record(timestamp, ticker, "BUY", shares, exec_price)
+        return total_cost
 
     def _sell_all(self, timestamp, ticker, price):
         if not self._is_valid_price(price):
@@ -90,8 +97,12 @@ class Top20AutoManager:
         if shares <= 0 or shares < 1e-6:
             return
 
-        self.cash += shares * price
-        self._record(timestamp, ticker, "SELL", shares, price)
+        exec_price = float(price) * (1.0 - (self.slippage_bps / 10_000.0))
+        proceeds = shares * exec_price
+        fee = proceeds * (self.fee_bps / 10_000.0)
+        net_proceeds = proceeds - fee
+        self.cash += net_proceeds
+        self._record(timestamp, ticker, "SELL", shares, exec_price)
         self.holdings.pop(ticker, None)
         self.last_sell_step_by_ticker[ticker] = self.step_index
 
