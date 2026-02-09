@@ -74,15 +74,17 @@ class DipStrategyTests(unittest.TestCase):
         self.assertTrue(result.empty or isinstance(result, pd.DataFrame))
         self.assertEqual(mock_download.call_count, 1)
 
-    @patch("src.api.data_fetcher.get_price_data")
+    @patch("src.api.data_fetcher._load_price_cache")
+    @patch("src.api.data_fetcher._get_price_data_from_alpha_vantage")
     @patch("yfinance.download")
-    def test_bulk_price_data_falls_back_when_bulk_empty(self, mock_download, mock_get_price_data):
+    def test_bulk_price_data_falls_back_when_bulk_empty(self, mock_download, mock_alpha, mock_cache):
         mock_download.return_value = pd.DataFrame()
         index = pd.date_range("2024-01-01", periods=2)
-        mock_get_price_data.side_effect = [
+        mock_alpha.side_effect = [
             pd.DataFrame({"Close": [100.0, 101.0]}, index=index),
             pd.DataFrame({"Close": [200.0, 201.0]}, index=index),
         ]
+        mock_cache.return_value = pd.DataFrame()
 
         result = data_fetcher.get_bulk_price_data(["AAPL", "MSFT"], period="1mo", interval="1d")
 
@@ -90,7 +92,7 @@ class DipStrategyTests(unittest.TestCase):
         self.assertIn("MSFT", result)
         self.assertFalse(result["AAPL"].empty)
         self.assertFalse(result["MSFT"].empty)
-        self.assertEqual(mock_get_price_data.call_count, 2)
+        self.assertEqual(mock_alpha.call_count, 2)
 
     @patch("src.api.data_fetcher.requests.get")
     @patch("src.api.data_fetcher.ALPHAVANTAGE_KEY", "demo")

@@ -20,6 +20,7 @@ client = finnhub.Client(api_key=FINNHUB_KEY)
 _alpha_status_logged = False
 _yf_rate_limit_logged = False
 _alpha_rate_limit_logged = False
+_alpha_error_logged = False
 
 
 def _cache_dir():
@@ -95,7 +96,7 @@ def _trim_period(frame, period):
 
 
 def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=1):
-    global _alpha_status_logged, _alpha_rate_limit_logged
+    global _alpha_status_logged, _alpha_rate_limit_logged, _alpha_error_logged
     if not ALPHAVANTAGE_KEY:
         if not _alpha_status_logged:
             print("[data] alpha fallback disabled (missing ALPHAVANTAGE_API_KEY / ALPHA_VANTAGE_API_KEY)")
@@ -125,15 +126,27 @@ def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_
             print(f"[data] alpha request failed for {ticker} ({exc})")
             return pd.DataFrame()
 
-        if isinstance(payload, dict) and payload.get("Note"):
-            if not _alpha_rate_limit_logged:
-                print("[data] alpha rate limited; skipping alpha fallback for this cycle")
-                _alpha_rate_limit_logged = True
-            return pd.DataFrame()
+        if isinstance(payload, dict):
+            if payload.get("Note"):
+                if not _alpha_rate_limit_logged:
+                    print("[data] alpha rate limited; skipping alpha fallback for this cycle")
+                    _alpha_rate_limit_logged = True
+                return pd.DataFrame()
+            if payload.get("Information") and not _alpha_error_logged:
+                print(f"[data] alpha info: {payload.get('Information')}")
+                _alpha_error_logged = True
+                return pd.DataFrame()
+            if payload.get("Error Message") and not _alpha_error_logged:
+                print(f"[data] alpha error: {payload.get('Error Message')}")
+                _alpha_error_logged = True
+                return pd.DataFrame()
 
         series = payload.get("Time Series (Daily)") if isinstance(payload, dict) else None
         if not isinstance(series, dict) or not series:
-            print(f"[data] {ticker}: alpha response missing daily series")
+            if not _alpha_error_logged:
+                keys = list(payload.keys()) if isinstance(payload, dict) else []
+                print(f"[data] alpha response missing daily series (sample ticker={ticker}, keys={keys})")
+                _alpha_error_logged = True
             return pd.DataFrame()
 
         frame = pd.DataFrame.from_dict(series, orient="index")
@@ -234,6 +247,23 @@ def _fallback_single_ticker_fetch(tickers, period, interval):
     return output
 
 
+def _fallback_alpha_or_cache_only(tickers, period, interval):
+    output = {}
+    for ticker in tickers:
+        alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=1)
+        if not alpha.empty:
+            _save_price_cache(ticker, period, interval, alpha)
+            output[ticker] = alpha
+            continue
+
+        cached = _load_price_cache(ticker, period, interval)
+        output[ticker] = cached if not cached.empty else pd.DataFrame()
+
+    empty_count = sum(1 for frame in output.values() if frame.empty)
+    print(f"[data] alpha/cache fallback complete: total={len(output)} empty={empty_count}")
+    return output
+
+
 def get_bulk_price_data(tickers, period="6mo", interval="1d"):
     """Fetch OHLCV data for multiple tickers in one yfinance call."""
     if not tickers:
@@ -251,14 +281,14 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
         )
     except Exception as exc:
         if _is_rate_limited(exc):
-            print(f"[data] bulk price fetch rate limited for {len(tickers)} tickers; falling back to single fetches")
-            return _fallback_single_ticker_fetch(tickers, period, interval)
+            print(f"[data] bulk price fetch rate limited for {len(tickers)} tickers; falling back to alpha/cache")
+            return _fallback_alpha_or_cache_only(tickers, period, interval)
         print(f"[data] bulk price fetch failed for {len(tickers)} tickers ({exc})")
         return _fallback_single_ticker_fetch(tickers, period, interval)
 
     if frame.empty:
-        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers; falling back to single fetches")
-        return _fallback_single_ticker_fetch(tickers, period, interval)
+        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers; falling back to alpha/cache")
+        return _fallback_alpha_or_cache_only(tickers, period, interval)
 
     # MultiIndex columns when multiple symbols are fetched.
     if isinstance(frame.columns, pd.MultiIndex):
