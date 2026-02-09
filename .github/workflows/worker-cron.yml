@@ -34,6 +34,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+          ALPACA_DATA_BASE_URL: ${{ vars.ALPACA_DATA_BASE_URL }}
           TRADE_MODE: ${{ vars.TRADE_MODE }}
           SIGNAL_BUY_THRESHOLD: ${{ vars.SIGNAL_BUY_THRESHOLD }}
           SIGNAL_SELL_THRESHOLD: ${{ vars.SIGNAL_SELL_THRESHOLD }}

@@ -12,12 +12,14 @@ Setup:
 
 1. Add `FINNHUB_API_KEY` in `.env`.
 2. Optional fallback: add `ALPHAVANTAGE_API_KEY` (or `ALPHA_VANTAGE_API_KEY`) in `.env` to fetch prices when Yahoo is rate-limited.
-3. Optional resilience cache: set `PRICE_CACHE_DIR` to reuse recently fetched OHLCV data when providers are throttled (defaults to `.cache/price_data`).
-4. Optional trading profile: set `TRADE_MODE` to `NORMAL` (default) or `AGGRESSIVE`.
+3. Optional fallback: add `ALPACA_API_KEY` and `ALPACA_API_SECRET` to use Alpaca market data as a secondary price source.
+   - Optional: `ALPACA_DATA_BASE_URL` (default `https://data.alpaca.markets/v2`)
+4. Optional resilience cache: set `PRICE_CACHE_DIR` to reuse recently fetched OHLCV data when providers are throttled (defaults to `.cache/price_data`).
+5. Optional trading profile: set `TRADE_MODE` to `NORMAL` (default) or `AGGRESSIVE`.
    - `NORMAL` defaults: `SIGNAL_BUY_THRESHOLD=1.0`, `SIGNAL_SELL_THRESHOLD=-1.0`, `TOP20_MIN_BUY_SCORE=0.75`
    - `AGGRESSIVE` defaults: `SIGNAL_BUY_THRESHOLD=0.55`, `SIGNAL_SELL_THRESHOLD=-0.7`, `TOP20_MIN_BUY_SCORE=0.45`
    - You can override any threshold directly with env vars if needed.
-5. Optional rotating fetch: `FETCH_BATCH_SIZE` (default `20`, which means no rotation for TOP20).
+6. Optional rotating fetch: `FETCH_BATCH_SIZE` (default `20`, which means no rotation for TOP20).
    - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
-6. `pip install -r requirements.txt`
-7. `streamlit run app.py`
+7. `pip install -r requirements.txt`
+8. `streamlit run app.py`

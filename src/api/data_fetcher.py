@@ -15,6 +15,9 @@ load_dotenv()
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY") or os.getenv("ALPHA_VANTAGE_API_KEY")
 ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
+ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET")
+ALPACA_DATA_BASE_URL = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets/v2")
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
 _alpha_status_logged = False
@@ -24,6 +27,9 @@ _alpha_error_logged = False
 _finnhub_status_logged = False
 _finnhub_rate_limit_logged = False
 _finnhub_error_logged = False
+_alpaca_status_logged = False
+_alpaca_rate_limit_logged = False
+_alpaca_error_logged = False
 
 
 def _cache_dir():
@@ -78,6 +84,11 @@ def _alpha_symbol(ticker):
     return str(ticker).strip().replace("-", ".")
 
 
+def _alpaca_symbol(ticker):
+    # Alpaca market data uses dot notation for share classes.
+    return str(ticker).strip().replace("-", ".")
+
+
 def _period_to_days(period):
     mapping = {
         "1mo": 31,
@@ -93,7 +104,9 @@ def _period_to_days(period):
 def _trim_period(frame, period):
     if frame.empty:
         return frame
-    cutoff = pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=_period_to_days(period))
+    cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=_period_to_days(period))
+    if getattr(frame.index, "tz", None) is None:
+        cutoff = cutoff.tz_localize(None)
     out = frame[frame.index >= cutoff]
     return out if not out.empty else frame
 
@@ -177,6 +190,83 @@ def _get_price_data_from_finnhub(ticker, period="6mo", interval="1d"):
     frame = _trim_period(frame, period)
     if not frame.empty:
         print(f"[data] {ticker}: finnhub rows={len(frame)}")
+    return frame
+
+
+def _get_price_data_from_alpaca(ticker, period="6mo", interval="1d"):
+    global _alpaca_status_logged, _alpaca_rate_limit_logged, _alpaca_error_logged
+
+    if not ALPACA_API_KEY or not ALPACA_API_SECRET:
+        if not _alpaca_status_logged:
+            print("[data] alpaca price fallback disabled (missing ALPACA_API_KEY / ALPACA_API_SECRET)")
+            _alpaca_status_logged = True
+        return pd.DataFrame()
+
+    if interval != "1d":
+        if not _alpaca_error_logged:
+            print(f"[data] alpaca fallback skipped (unsupported interval={interval})")
+            _alpaca_error_logged = True
+        return pd.DataFrame()
+
+    if not _alpaca_status_logged:
+        print("[data] alpaca price fallback enabled")
+        _alpaca_status_logged = True
+
+    start_ts, end_ts = _finnhub_window_unix(period)
+    start_iso = pd.to_datetime(start_ts, unit="s", utc=True).isoformat().replace("+00:00", "Z")
+    end_iso = pd.to_datetime(end_ts, unit="s", utc=True).isoformat().replace("+00:00", "Z")
+
+    symbol = _alpaca_symbol(ticker)
+    url = f"{ALPACA_DATA_BASE_URL.rstrip('/')}/stocks/{symbol}/bars"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+    }
+    params = {
+        "timeframe": "1Day",
+        "start": start_iso,
+        "end": end_iso,
+        "adjustment": "raw",
+        "limit": 10000,
+        "feed": "iex",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        if response.status_code == 429:
+            if not _alpaca_rate_limit_logged:
+                print("[data] alpaca rate limited; skipping alpaca fallback for this cycle")
+                _alpaca_rate_limit_logged = True
+            return pd.DataFrame()
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        if not _alpaca_error_logged:
+            print(f"[data] alpaca request failed (sample ticker={ticker}): {exc}")
+            _alpaca_error_logged = True
+        return pd.DataFrame()
+
+    bars = payload.get("bars") if isinstance(payload, dict) else None
+    if not isinstance(bars, list) or not bars:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(bars)
+    required = ["o", "h", "l", "c", "v", "t"]
+    if any(col not in frame.columns for col in required):
+        if not _alpaca_error_logged:
+            print(f"[data] alpaca response missing required fields (sample ticker={ticker})")
+            _alpaca_error_logged = True
+        return pd.DataFrame()
+
+    frame = frame.rename(columns={"o": "Open", "h": "High", "l": "Low", "c": "Close", "v": "Volume", "t": "time"})
+    frame["time"] = pd.to_datetime(frame["time"], errors="coerce")
+    frame = frame[frame["time"].notna()].set_index("time")
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    frame = frame[["Open", "High", "Low", "Close", "Volume"]].dropna(how="all").sort_index()
+    frame = _trim_period(frame, period)
+    if not frame.empty:
+        print(f"[data] {ticker}: alpaca rows={len(frame)}")
     return frame
 
 
@@ -272,6 +362,11 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
         _save_price_cache(ticker, period, interval, finnhub_data)
         return finnhub_data
 
+    alpaca_data = _get_price_data_from_alpaca(ticker, period=period, interval=interval)
+    if not alpaca_data.empty:
+        _save_price_cache(ticker, period, interval, alpaca_data)
+        return alpaca_data
+
     for attempt in range(1, max_retries + 1):
         try:
             data = yf.download(
@@ -344,6 +439,12 @@ def _fallback_alpha_or_cache_only(tickers, period, interval):
         if not finnhub_data.empty:
             _save_price_cache(ticker, period, interval, finnhub_data)
             output[ticker] = finnhub_data
+            continue
+
+        alpaca_data = _get_price_data_from_alpaca(ticker, period=period, interval=interval)
+        if not alpaca_data.empty:
+            _save_price_cache(ticker, period, interval, alpaca_data)
+            output[ticker] = alpaca_data
             continue
 
         alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=1)

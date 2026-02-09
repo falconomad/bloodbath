@@ -61,6 +61,47 @@ class DataSourceTests(unittest.TestCase):
 
         self.assertFalse(frame.empty)
 
+    @patch("src.api.data_fetcher.ALPACA_API_SECRET", "secret")
+    @patch("src.api.data_fetcher.ALPACA_API_KEY", "key")
+    @patch("src.api.data_fetcher.FINNHUB_KEY", "demo")
+    @patch("src.api.data_fetcher.client")
+    @patch("src.api.data_fetcher.requests.get")
+    def test_get_price_data_uses_alpaca_after_finnhub_no_data(self, mock_requests_get, mock_client):
+        mock_client.stock_candles.return_value = {"s": "no_data"}
+        mock_response = unittest.mock.Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "bars": [
+                {"t": "2026-02-06T00:00:00Z", "o": 100.0, "h": 102.0, "l": 99.0, "c": 101.0, "v": 100000},
+                {"t": "2026-02-07T00:00:00Z", "o": 101.0, "h": 103.0, "l": 100.0, "c": 102.0, "v": 110000},
+            ]
+        }
+        mock_requests_get.return_value = mock_response
+
+        frame = data_fetcher.get_price_data("AAPL", period="1mo", interval="1d")
+
+        self.assertFalse(frame.empty)
+        self.assertIn("Close", frame.columns)
+        self.assertEqual(len(frame), 2)
+
+    @patch("src.api.data_fetcher.ALPACA_API_SECRET", "secret")
+    @patch("src.api.data_fetcher.ALPACA_API_KEY", "key")
+    @patch("src.api.data_fetcher.requests.get")
+    def test_alpaca_symbol_conversion_for_share_class(self, mock_requests_get):
+        mock_response = unittest.mock.Mock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "bars": [{"t": "2026-02-07T00:00:00Z", "o": 500.0, "h": 505.0, "l": 495.0, "c": 503.0, "v": 9000}]
+        }
+        mock_requests_get.return_value = mock_response
+
+        data_fetcher._get_price_data_from_alpaca("BRK-B", period="1mo", interval="1d")
+
+        called_url = mock_requests_get.call_args.args[0]
+        self.assertIn("/stocks/BRK.B/bars", called_url)
+
 
 if __name__ == "__main__":
     unittest.main()
