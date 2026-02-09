@@ -113,7 +113,7 @@ def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_
     params = {
         "function": "TIME_SERIES_DAILY",
         "symbol": symbol,
-        "outputsize": "full",
+        "outputsize": "compact",
         "apikey": ALPHAVANTAGE_KEY,
     }
 
