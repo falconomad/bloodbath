@@ -220,7 +220,12 @@ class Top20ManagerTests(unittest.TestCase):
         self.assertFalse(partial.empty)
 
     def test_allocates_more_to_higher_weighted_buy_candidates(self):
-        manager = Top20AutoManager(starting_capital=1000, max_positions=3, max_allocation_per_position=0.8)
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=3,
+            max_allocation_per_position=0.8,
+            buy_confirm_steps=1,
+        )
 
         manager.step(
             [
@@ -246,6 +251,32 @@ class Top20ManagerTests(unittest.TestCase):
         aaa_value = manager.holdings["AAA"]["shares"] * manager.last_price_by_ticker["AAA"]
         bbb_value = manager.holdings["BBB"]["shares"] * manager.last_price_by_ticker["BBB"]
         self.assertGreater(aaa_value, bbb_value)
+
+    def test_buy_requires_consecutive_confirmation_by_default(self):
+        manager = Top20AutoManager(
+            starting_capital=500,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=2,
+        )
+
+        manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0, "growth_20d": 0.05}])
+        self.assertNotIn("AAA", manager.holdings)
+
+        manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 101.0, "growth_20d": 0.05}])
+        self.assertIn("AAA", manager.holdings)
+
+    def test_buy_blocks_overextended_entries(self):
+        manager = Top20AutoManager(
+            starting_capital=500,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=1,
+            max_entry_growth_20d=0.10,
+        )
+
+        manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0, "growth_20d": 0.25}])
+        self.assertNotIn("AAA", manager.holdings)
 
 
 if __name__ == "__main__":
