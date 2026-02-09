@@ -330,11 +330,6 @@ def get_alpaca_snapshot_features(ticker):
 
 def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
     global _yf_rate_limit_logged
-    finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
-    if not finnhub_data.empty:
-        _save_price_cache(ticker, period, interval, finnhub_data)
-        return finnhub_data
-
     alpaca_data = _get_price_data_from_alpaca(ticker, period=period, interval=interval)
     if not alpaca_data.empty:
         _save_price_cache(ticker, period, interval, alpaca_data)
@@ -352,7 +347,7 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
             )
             if data.empty:
                 if not _yf_rate_limit_logged:
-                    print("[data] yfinance returned empty/rate-limited data; falling back to cache")
+                    print("[data] yfinance returned empty/rate-limited data; falling back to finnhub/cache")
                     _yf_rate_limit_logged = True
                 break
             print(f"[data] {ticker}: price rows={len(data)}")
@@ -361,11 +356,16 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
         except Exception as exc:
             if _is_rate_limited(exc):
                 if not _yf_rate_limit_logged:
-                    print("[data] yfinance rate limited; falling back to cache")
+                    print("[data] yfinance rate limited; falling back to finnhub/cache")
                     _yf_rate_limit_logged = True
                 break
             print(f"[data] yfinance price fetch failed for {ticker} ({exc})")
             break
+
+    finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
+    if not finnhub_data.empty:
+        _save_price_cache(ticker, period, interval, finnhub_data)
+        return finnhub_data
 
     cached = _load_price_cache(ticker, period, interval)
     if not cached.empty:
@@ -403,16 +403,16 @@ def _fallback_single_ticker_fetch(tickers, period, interval):
 def _fallback_providers_or_cache_only(tickers, period, interval):
     output = {}
     for ticker in tickers:
-        finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
-        if not finnhub_data.empty:
-            _save_price_cache(ticker, period, interval, finnhub_data)
-            output[ticker] = finnhub_data
-            continue
-
         alpaca_data = _get_price_data_from_alpaca(ticker, period=period, interval=interval)
         if not alpaca_data.empty:
             _save_price_cache(ticker, period, interval, alpaca_data)
             output[ticker] = alpaca_data
+            continue
+
+        finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
+        if not finnhub_data.empty:
+            _save_price_cache(ticker, period, interval, finnhub_data)
+            output[ticker] = finnhub_data
             continue
 
         cached = _load_price_cache(ticker, period, interval)
