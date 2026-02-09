@@ -18,6 +18,8 @@ ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
 _alpha_status_logged = False
+_yf_rate_limit_logged = False
+_alpha_rate_limit_logged = False
 
 
 def _cache_dir():
@@ -92,8 +94,8 @@ def _trim_period(frame, period):
     return out if not out.empty else frame
 
 
-def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=3):
-    global _alpha_status_logged
+def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=1):
+    global _alpha_status_logged, _alpha_rate_limit_logged
     if not ALPHAVANTAGE_KEY:
         if not _alpha_status_logged:
             print("[data] alpha fallback disabled (missing ALPHAVANTAGE_API_KEY / ALPHA_VANTAGE_API_KEY)")
@@ -120,19 +122,13 @@ def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:
-            if attempt < max_retries:
-                print(f"[data] {ticker}: alpha request failed on attempt {attempt}/{max_retries}, retrying ({exc})")
-                _backoff_sleep(attempt, base_seconds=2.0)
-                continue
-            print(f"[data] {ticker}: alpha request failed ({exc})")
+            print(f"[data] alpha request failed for {ticker} ({exc})")
             return pd.DataFrame()
 
         if isinstance(payload, dict) and payload.get("Note"):
-            if attempt < max_retries:
-                print(f"[data] {ticker}: alpha rate limited on attempt {attempt}/{max_retries}, retrying")
-                _backoff_sleep(attempt, base_seconds=12.0)
-                continue
-            print(f"[data] {ticker}: alpha rate limited after {max_retries} attempts")
+            if not _alpha_rate_limit_logged:
+                print("[data] alpha rate limited; skipping alpha fallback for this cycle")
+                _alpha_rate_limit_logged = True
             return pd.DataFrame()
 
         series = payload.get("Time Series (Daily)") if isinstance(payload, dict) else None
@@ -165,13 +161,14 @@ def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_
 
         frame = frame.dropna(how="all")
         frame = _trim_period(frame, period)
-        print(f"[data] {ticker}: alpha fallback rows={len(frame)} empty={frame.empty}")
+        print(f"[data] {ticker}: alpha fallback rows={len(frame)}")
         return frame
 
     return pd.DataFrame()
 
 
-def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
+def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
+    global _yf_rate_limit_logged
     for attempt in range(1, max_retries + 1):
         try:
             data = yf.download(
@@ -183,17 +180,20 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
                 threads=False,
             )
             if data.empty:
-                print(f"[data] {ticker}: yfinance returned empty frame")
+                if not _yf_rate_limit_logged:
+                    print("[data] yfinance returned empty/rate-limited data; falling back to alpha/cache")
+                    _yf_rate_limit_logged = True
                 break
-            print(f"[data] {ticker}: price rows={len(data)} empty={data.empty}")
+            print(f"[data] {ticker}: price rows={len(data)}")
             _save_price_cache(ticker, period, interval, data)
             return data
         except Exception as exc:
-            if _is_rate_limited(exc) and attempt < max_retries:
-                print(f"[data] {ticker}: rate limited on attempt {attempt}/{max_retries}, retrying")
-                _backoff_sleep(attempt)
-                continue
-            print(f"[data] {ticker}: price fetch failed ({exc})")
+            if _is_rate_limited(exc):
+                if not _yf_rate_limit_logged:
+                    print("[data] yfinance rate limited; falling back to alpha/cache")
+                    _yf_rate_limit_logged = True
+                break
+            print(f"[data] yfinance price fetch failed for {ticker} ({exc})")
             break
 
     alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=2)
@@ -228,7 +228,7 @@ def get_company_news(ticker, lookback_days=7, limit=10):
 def _fallback_single_ticker_fetch(tickers, period, interval):
     output = {}
     for ticker in tickers:
-        output[ticker] = get_price_data(ticker, period=period, interval=interval, max_retries=2)
+        output[ticker] = get_price_data(ticker, period=period, interval=interval, max_retries=1)
     empty_count = sum(1 for frame in output.values() if frame.empty)
     print(f"[data] single-ticker fallback complete: total={len(output)} empty={empty_count}")
     return output
