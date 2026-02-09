@@ -1,0 +1,7 @@
+pandas
+numpy
+yfinance
+requests
+python-dotenv
+finnhub-python
+psycopg2-binary
