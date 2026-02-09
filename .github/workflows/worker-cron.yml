@@ -32,5 +32,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          TRADE_MODE: ${{ vars.TRADE_MODE }}
+          SIGNAL_BUY_THRESHOLD: ${{ vars.SIGNAL_BUY_THRESHOLD }}
+          SIGNAL_SELL_THRESHOLD: ${{ vars.SIGNAL_SELL_THRESHOLD }}
+          TOP20_MIN_BUY_SCORE: ${{ vars.TOP20_MIN_BUY_SCORE }}
         run: |
           python worker/auto_worker.py

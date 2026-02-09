@@ -53,9 +53,9 @@ def generate_recommendation(ticker, price_data=None, news=None):
     weighted_score = (trend_weight * trend_score) + (news_weight * sentiment) + (event_weight * event_score)
     score = _clamp(weighted_score * 2.0, -2.0, 2.0)
 
-    if score >= 0.7:
+    if score >= RECOMMENDATION_DECISION_THRESHOLD:
         decision = "BUY"
-    elif score <= -0.7:
+    elif score <= -RECOMMENDATION_DECISION_THRESHOLD:
         decision = "SELL"
     else:
         decision = "HOLD"
@@ -124,9 +124,22 @@ def run_sp500_cycle(decision, data):
 
 from src.core.sp500_list import TOP20, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
-from src.settings import TOP20_STARTING_CAPITAL
+from src.settings import (
+    TOP20_STARTING_CAPITAL,
+    TOP20_MIN_BUY_SCORE,
+    SIGNAL_BUY_THRESHOLD,
+    SIGNAL_SELL_THRESHOLD,
+    RECOMMENDATION_DECISION_THRESHOLD,
+    TRADE_MODE,
+)
 
-top20_manager = Top20AutoManager(starting_capital=TOP20_STARTING_CAPITAL)
+print(
+    f"[config] TRADE_MODE={TRADE_MODE} "
+    f"SIGNAL_BUY_THRESHOLD={SIGNAL_BUY_THRESHOLD} SIGNAL_SELL_THRESHOLD={SIGNAL_SELL_THRESHOLD} "
+    f"TOP20_MIN_BUY_SCORE={TOP20_MIN_BUY_SCORE}"
+)
+
+top20_manager = Top20AutoManager(starting_capital=TOP20_STARTING_CAPITAL, min_buy_score=TOP20_MIN_BUY_SCORE)
 
 
 def _build_candidate_list(universe_size=120, dip_scan_size=60):
@@ -205,9 +218,9 @@ def run_top20_cycle_with_signals():
             f"dip={meta['dip_score']:.4f}, vol_penalty={meta['volatility_penalty']:.4f}, final={final_score:.4f}"
         )
 
-        if final_score > 1:
+        if final_score >= SIGNAL_BUY_THRESHOLD:
             decision = "BUY"
-        elif final_score < -1:
+        elif final_score <= SIGNAL_SELL_THRESHOLD:
             decision = "SELL"
         else:
             decision = "HOLD"
