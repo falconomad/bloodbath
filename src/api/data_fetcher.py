@@ -428,6 +428,16 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
     if not tickers:
         return {}
 
+    # Fast path: when Alpaca credentials exist, avoid expensive Yahoo bulk call first.
+    if ALPACA_API_KEY and ALPACA_API_SECRET:
+        print(f"[data] bulk provider-first path enabled for {len(tickers)} tickers (alpaca credentials present)")
+        provider_map = _fallback_providers_or_cache_only(tickers, period, interval)
+        missing = [t for t, frame in provider_map.items() if frame.empty]
+        if not missing:
+            return provider_map
+        print(f"[data] provider-first missing={len(missing)}; attempting Yahoo bulk fallback for missing symbols")
+        tickers = missing
+
     try:
         frame = yf.download(
             tickers=tickers,
