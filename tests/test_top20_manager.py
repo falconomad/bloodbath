@@ -64,7 +64,12 @@ class Top20ManagerTests(unittest.TestCase):
         self.assertLess(float(manager.holdings["AAA"]["shares"]), 1.0)
 
     def test_sells_current_holding_on_explicit_sell_signal(self):
-        manager = Top20AutoManager(starting_capital=500, max_positions=3, max_allocation_per_position=0.6)
+        manager = Top20AutoManager(
+            starting_capital=500,
+            max_positions=3,
+            max_allocation_per_position=0.6,
+            sell_confirm_steps=1,
+        )
 
         manager.step(
             [
@@ -138,17 +143,24 @@ class Top20ManagerTests(unittest.TestCase):
 
         self.assertNotIn("AAA", manager.holdings)
 
-    def test_take_profit_sells_when_gain_threshold_hit(self):
-        manager = Top20AutoManager(starting_capital=500, max_positions=2, max_allocation_per_position=0.6)
+    def test_take_profit_reduces_position_when_gain_threshold_hit(self):
+        manager = Top20AutoManager(
+            starting_capital=500,
+            max_positions=2,
+            max_allocation_per_position=0.6,
+            take_profit_partial_ratio=0.5,
+        )
         manager.step([
             {"ticker": "AAA", "decision": "BUY", "score": 2.2, "price": 100.0},
         ])
+        shares_before = manager.holdings["AAA"]["shares"]
 
         manager.step([
             {"ticker": "AAA", "decision": "HOLD", "score": 0.0, "price": 132.0},
         ])
 
-        self.assertNotIn("AAA", manager.holdings)
+        self.assertIn("AAA", manager.holdings)
+        self.assertLess(manager.holdings["AAA"]["shares"], shares_before)
 
     def test_cooldown_prevents_immediate_reentry_after_sell(self):
         manager = Top20AutoManager(
@@ -156,6 +168,7 @@ class Top20ManagerTests(unittest.TestCase):
             max_positions=2,
             max_allocation_per_position=0.6,
             cooldown_after_sell_steps=1,
+            sell_confirm_steps=1,
         )
         manager.step([
             {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0},
@@ -176,6 +189,35 @@ class Top20ManagerTests(unittest.TestCase):
             {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 94.0},
         ])
         self.assertIn("AAA", manager.holdings)
+
+    def test_sell_requires_consecutive_confirmation_by_default(self):
+        manager = Top20AutoManager(starting_capital=500, max_positions=1, max_allocation_per_position=1.0)
+        manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0}])
+        self.assertIn("AAA", manager.holdings)
+
+        manager.step([{"ticker": "AAA", "decision": "SELL", "score": -2.0, "price": 100.0}])
+        self.assertIn("AAA", manager.holdings)
+
+        manager.step([{"ticker": "AAA", "decision": "SELL", "score": -2.0, "price": 99.0}])
+        self.assertNotIn("AAA", manager.holdings)
+
+    def test_take_profit_executes_partial_sell(self):
+        manager = Top20AutoManager(
+            starting_capital=500,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            take_profit_partial_ratio=0.5,
+        )
+        manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0}])
+        shares_before = manager.holdings["AAA"]["shares"]
+
+        manager.step([{"ticker": "AAA", "decision": "HOLD", "score": 0.0, "price": 135.0}])
+        self.assertIn("AAA", manager.holdings)
+        self.assertLess(manager.holdings["AAA"]["shares"], shares_before)
+
+        tx = manager.transactions_df()
+        partial = tx[(tx["ticker"] == "AAA") & (tx["action"] == "SELL_PARTIAL_TP")]
+        self.assertFalse(partial.empty)
 
     def test_allocates_more_to_higher_weighted_buy_candidates(self):
         manager = Top20AutoManager(starting_capital=1000, max_positions=3, max_allocation_per_position=0.8)

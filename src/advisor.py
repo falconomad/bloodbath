@@ -47,6 +47,34 @@ def _recent_growth_score(data, lookback=20):
     return (end - start) / start
 
 
+def _atr_percent(data, period=14):
+    if data is None or data.empty:
+        return 0.0
+    required = {"High", "Low", "Close"}
+    if not required.issubset(set(data.columns)):
+        return 0.0
+
+    frame = data[["High", "Low", "Close"]].dropna().copy()
+    if len(frame) < period + 1:
+        return 0.0
+
+    prev_close = frame["Close"].shift(1)
+    tr = pd.concat(
+        [
+            (frame["High"] - frame["Low"]).abs(),
+            (frame["High"] - prev_close).abs(),
+            (frame["Low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+
+    atr = tr.rolling(window=period).mean().iloc[-1]
+    close = float(frame["Close"].iloc[-1])
+    if pd.isna(atr) or close <= 0:
+        return 0.0
+    return float(atr) / close
+
+
 def generate_recommendation(ticker, price_data=None, news=None):
     data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
@@ -277,6 +305,7 @@ def run_top20_cycle_with_signals():
                 "price": price,
                 "sentiment": float(rec.get("sentiment", 0.0)),
                 "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
+                "atr_pct": round(_atr_percent(data, period=14), 5),
             }
         )
 
@@ -298,6 +327,7 @@ def run_top20_cycle_with_signals():
                 "price": price,
                 "sentiment": 0.0,
                 "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
+                "atr_pct": round(_atr_percent(data, period=14), 5),
             }
         )
         print(f"[cycle] {ticker}: mark-to-market price={price:.2f}")
