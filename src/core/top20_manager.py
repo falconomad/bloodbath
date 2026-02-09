@@ -19,6 +19,9 @@ class Top20AutoManager:
         sell_confirm_steps=2,
         take_profit_partial_ratio=0.5,
         trailing_atr_mult=2.5,
+        buy_confirm_steps=1,
+        max_entry_growth_20d=0.18,
+        initial_entry_ratio=1.0,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
@@ -33,11 +36,15 @@ class Top20AutoManager:
         self.sell_confirm_steps = int(sell_confirm_steps)
         self.take_profit_partial_ratio = float(take_profit_partial_ratio)
         self.trailing_atr_mult = float(trailing_atr_mult)
+        self.buy_confirm_steps = int(buy_confirm_steps)
+        self.max_entry_growth_20d = float(max_entry_growth_20d)
+        self.initial_entry_ratio = float(initial_entry_ratio)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
         self.last_sell_step_by_ticker = {}
         self.sell_streak_by_ticker = {}
+        self.buy_streak_by_ticker = {}
         self.step_index = 0
         self.history = []
         self.transactions = []
@@ -259,13 +266,28 @@ class Top20AutoManager:
                 self._sell_all(timestamp, ticker, price)
 
         # 2) Open new BUY positions across strongest candidates.
-        buy_candidates = [
-            a
-            for a in analyses
-            if a["decision"] == "BUY"
-            and float(a.get("score", 0.0)) >= self.min_buy_score
-            and self._is_valid_price(a["price"])
-        ]
+        buy_candidates = []
+        for a in analyses:
+            ticker = a["ticker"]
+            if a["decision"] == "BUY":
+                self.buy_streak_by_ticker[ticker] = self.buy_streak_by_ticker.get(ticker, 0) + 1
+            else:
+                self.buy_streak_by_ticker[ticker] = 0
+
+            if a["decision"] != "BUY":
+                continue
+            if float(a.get("score", 0.0)) < self.min_buy_score:
+                continue
+            if not self._is_valid_price(a["price"]):
+                continue
+            if self.buy_streak_by_ticker.get(ticker, 0) < self.buy_confirm_steps:
+                continue
+
+            growth_20d = float(a.get("growth_20d", 0.0))
+            if growth_20d > self.max_entry_growth_20d:
+                continue
+
+            buy_candidates.append(a)
         buy_candidates.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
         buy_candidates = [
@@ -286,7 +308,7 @@ class Top20AutoManager:
             if new_candidates and exposure_budget_remaining > 0:
                 weights = [self._buy_weight(c) for c in new_candidates]
                 total_weight = sum(weights) if weights else 0.0
-                planned_new_budget = exposure_budget_remaining
+                planned_new_budget = exposure_budget_remaining * self.initial_entry_ratio
                 for candidate, weight in zip(new_candidates, weights):
                     if exposure_budget_remaining <= 0:
                         break
