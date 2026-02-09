@@ -35,16 +35,16 @@ if is_dark:
     metric_bg_3 = "#232033"
     plot_template = "plotly_dark"
     pie_palette = [
-        "#4D8DFF",
-        "#3CCFCF",
-        "#7BD389",
-        "#F2C14E",
-        "#FF8C69",
-        "#C084FC",
-        "#5EEAD4",
-        "#A3E635",
-        "#F97316",
-        "#F43F5E",
+        "#3468BF",
+        "#2B8F8F",
+        "#4F9768",
+        "#B38B3A",
+        "#C06E56",
+        "#8E63BC",
+        "#3F9D93",
+        "#739E32",
+        "#B45A12",
+        "#B8334A",
     ]
 else:
     bg = "#f3f4f6"
