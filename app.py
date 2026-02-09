@@ -334,6 +334,22 @@ def _color_decision(v):
     return f"color: {neutral_color}; font-weight: 600;"
 
 
+def _signed_bar_hex(v, max_abs):
+    try:
+        n = float(v)
+    except Exception:
+        return neutral_color
+    if max_abs <= 0:
+        return neutral_color
+
+    strength = min(abs(n) / max_abs, 1.0)
+    if n >= 0:
+        # Higher gains -> darker green.
+        return "#22C55E" if strength < 0.35 else ("#16A34A" if strength < 0.7 else "#166534")
+    # Higher losses -> darker red.
+    return "#F87171" if strength < 0.35 else ("#EF4444" if strength < 0.7 else "#991B1B")
+
+
 skeleton_placeholder = st.empty()
 with skeleton_placeholder.container():
     show_dashboard_skeleton()
@@ -519,19 +535,16 @@ if not positions.empty:
 
     with viz_col2:
         pnl_view = positions.sort_values("pnl_pct_display", ascending=False).copy()
-        pnl_view["abs_pnl_pct"] = pnl_view["pnl_pct_display"].abs()
+        max_abs_pnl = float(pnl_view["pnl_pct_display"].abs().max()) if not pnl_view.empty else 0.0
+        pnl_view["bar_color"] = pnl_view["pnl_pct_display"].apply(lambda v: _signed_bar_hex(v, max_abs_pnl))
         pnl_fig = px.bar(
             pnl_view,
             x="ticker",
             y="pnl_pct_display",
-            color="abs_pnl_pct",
+            color="ticker",
             title="Position P/L %",
             template=plot_template,
-            color_continuous_scale=[
-                [0.0, down_color],
-                [0.5, "#bfc7d6" if is_dark else "#cfd6e2"],
-                [1.0, up_color],
-            ],
+            color_discrete_map={row["ticker"]: row["bar_color"] for _, row in pnl_view.iterrows()},
         )
         pnl_fig.update_traces(
             marker_line_width=0,
