@@ -1,9 +1,18 @@
 import os
-from transformers import pipeline
+import importlib
+
+
+_transformers_spec = importlib.util.find_spec("transformers")
+pipeline = None
+if _transformers_spec is not None:
+    pipeline = importlib.import_module("transformers").pipeline
 
 
 def _build_sentiment_model():
     """Create the FinBERT pipeline when credentials are available."""
+    if pipeline is None:
+        return None
+
     hf_token = os.getenv("HF_TOKEN")
     if not hf_token:
         return None
