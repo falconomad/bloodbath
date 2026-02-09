@@ -53,24 +53,30 @@ def _fallback_config() -> dict[str, Any]:
             "sell_score": -0.45,
             "min_confidence": 0.45,
             "force_hold_confidence": 0.35,
+            "high_conflict_force_hold": 0.7,
         },
         "quality": {
             "min_price_points": 40,
             "max_missing_ratio": 0.05,
             "min_news_articles": 3,
             "min_sentiment_articles": 4,
+            "min_usable_signals": 3,
         },
         "risk": {
             "min_rel_volume_for_buy": 0.75,
             "extreme_negative_sentiment": -0.7,
             "max_atr_pct_for_full_risk": 0.08,
             "conflict_penalty": 0.20,
+            "max_confidence_drop_on_conflict": 0.75,
+            "max_data_gap_ratio_for_trade": 0.05,
+            "require_micro_for_buy": True,
             "max_position_size": 0.20,
             "min_position_size": 0.02,
         },
         "stability": {
             "min_decision_hold_cycles": 2,
             "min_cycles_between_flips": 2,
+            "min_cycles_between_non_hold_signals": 1,
         },
     }
 
@@ -132,16 +138,68 @@ def conflict_ratio(signals: dict[str, Signal]) -> float:
     return clamp(1.0 - aligned, 0.0, 1.0)
 
 
-def aggregate_confidence(signals: dict[str, Signal], conflict_penalty: float) -> tuple[float, float]:
-    usable = [s for s in signals.values() if s.quality_ok]
+def aggregate_confidence(
+    signals: dict[str, Signal],
+    conflict_penalty: float,
+    weights: dict[str, float] | None = None,
+    max_conflict_drop: float = 0.75,
+) -> tuple[float, float]:
+    usable = [(name, s) for name, s in signals.items() if s.quality_ok]
     if not usable:
         return 0.0, 1.0
 
-    avg_conf = sum(s.confidence for s in usable) / len(usable)
+    if weights:
+        weighted_conf = 0.0
+        total_w = 0.0
+        for name, signal in usable:
+            w = max(float(weights.get(name, 0.0)), 0.0)
+            if w <= 0:
+                continue
+            weighted_conf += signal.confidence * w
+            total_w += w
+        avg_conf = (weighted_conf / total_w) if total_w > 0 else (sum(s.confidence for _, s in usable) / len(usable))
+    else:
+        avg_conf = sum(s.confidence for _, s in usable) / len(usable)
+
     conflicts = conflict_ratio(signals)
-    penalty = conflicts * float(conflict_penalty)
+    # Conflict grows non-linearly so direct opposition drops confidence sharply.
+    penalty = (conflicts**2) * float(conflict_penalty)
+    penalty = clamp(penalty, 0.0, float(max_conflict_drop))
     final_conf = clamp(avg_conf * (1.0 - penalty), 0.0, 1.0)
     return final_conf, conflicts
+
+
+def hard_guardrails(
+    signals: dict[str, Signal],
+    risk_context: dict[str, Any],
+    cfg: dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    quality = cfg.get("quality", {})
+    risk = cfg.get("risk", {})
+
+    usable_signals = sum(1 for s in signals.values() if s.quality_ok)
+    if usable_signals < int(quality.get("min_usable_signals", 3)):
+        reasons.append("guardrail:insufficient_usable_signals")
+
+    data_quality_ok = bool(risk_context.get("data_quality_ok", True))
+    if not data_quality_ok:
+        reasons.append("guardrail:price_data_quality")
+
+    data_gap_ratio = float(risk_context.get("data_gap_ratio", 0.0))
+    if data_gap_ratio > float(risk.get("max_data_gap_ratio_for_trade", 0.05)):
+        reasons.append("guardrail:data_gaps")
+
+    min_rel_volume = float(risk.get("min_rel_volume_for_buy", 0.75))
+    rel_volume = float(risk_context.get("rel_volume", 1.0))
+    if rel_volume < min_rel_volume:
+        reasons.append("guardrail:low_volume")
+
+    require_micro_for_buy = bool(risk.get("require_micro_for_buy", True))
+    if require_micro_for_buy and not bool(risk_context.get("micro_available", False)):
+        reasons.append("guardrail:micro_unavailable")
+
+    return reasons
 
 
 def position_size(score: float, confidence: float, cfg: dict[str, Any]) -> float:
@@ -162,18 +220,27 @@ def apply_stability(
     stability = cfg.get("stability", {})
     min_hold = int(stability.get("min_decision_hold_cycles", 2))
     min_flip_gap = int(stability.get("min_cycles_between_flips", 2))
+    min_non_hold_gap = int(stability.get("min_cycles_between_non_hold_signals", 1))
 
     previous = state.get(ticker)
     if not previous:
-        state[ticker] = {"decision": proposed_decision, "cycle": cycle_idx, "flip_cycle": cycle_idx}
+        state[ticker] = {
+            "decision": proposed_decision,
+            "cycle": cycle_idx,
+            "flip_cycle": cycle_idx,
+            "last_non_hold_cycle": cycle_idx if proposed_decision != "HOLD" else -10_000,
+        }
         return proposed_decision, ""
 
     prev_decision = str(previous.get("decision", "HOLD"))
     prev_cycle = int(previous.get("cycle", cycle_idx))
     prev_flip = int(previous.get("flip_cycle", prev_cycle))
+    prev_non_hold = int(previous.get("last_non_hold_cycle", prev_cycle))
 
     if proposed_decision == prev_decision:
         previous["cycle"] = cycle_idx
+        if proposed_decision != "HOLD":
+            previous["last_non_hold_cycle"] = cycle_idx
         return proposed_decision, ""
 
     if cycle_idx - prev_cycle < min_hold:
@@ -182,7 +249,12 @@ def apply_stability(
     if cycle_idx - prev_flip < min_flip_gap:
         return prev_decision, "stability:min_flip_gap"
 
+    if proposed_decision != "HOLD" and (cycle_idx - prev_non_hold < min_non_hold_gap):
+        return "HOLD", "stability:min_non_hold_gap"
+
     previous.update({"decision": proposed_decision, "cycle": cycle_idx, "flip_cycle": cycle_idx})
+    if proposed_decision != "HOLD":
+        previous["last_non_hold_cycle"] = cycle_idx
     return proposed_decision, ""
 
 
@@ -206,8 +278,19 @@ def decide(
     min_conf = float(thresholds.get("min_confidence", 0.45))
     buy_t = float(thresholds.get("buy_score", 0.45))
     sell_t = float(thresholds.get("sell_score", -0.45))
+    conflict_hold_t = float(thresholds.get("high_conflict_force_hold", 0.7))
 
-    if confidence < force_hold_conf:
+    guardrail_reasons = hard_guardrails(signals, risk_context, cfg)
+    if guardrail_reasons:
+        reasons.extend(guardrail_reasons)
+
+    local_conflict = conflict_ratio(signals)
+    if local_conflict >= conflict_hold_t:
+        reasons.append("conflict:high_disagreement")
+
+    if guardrail_reasons or local_conflict >= conflict_hold_t:
+        decision = "HOLD"
+    elif confidence < force_hold_conf:
         reasons.append("confidence:force_hold")
     else:
         if score >= buy_t:
@@ -224,9 +307,6 @@ def decide(
     if decision == "BUY" and sentiment_value <= float(risk.get("extreme_negative_sentiment", -0.7)):
         decision = "HOLD"
         reasons.append("risk:extreme_negative_sentiment")
-    if decision == "BUY" and rel_volume < float(risk.get("min_rel_volume_for_buy", 0.75)):
-        decision = "HOLD"
-        reasons.append("risk:low_volume")
 
     decision, stability_reason = apply_stability(ticker, decision, state, cycle_idx, cfg)
     if stability_reason:

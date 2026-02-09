@@ -11,21 +11,27 @@ thresholds:
   sell_score: -0.45
   min_confidence: 0.45
   force_hold_confidence: 0.35
+  high_conflict_force_hold: 0.7
 
 quality:
   min_price_points: 40
   max_missing_ratio: 0.05
   min_news_articles: 3
   min_sentiment_articles: 4
+  min_usable_signals: 3
 
 risk:
   min_rel_volume_for_buy: 0.75
   extreme_negative_sentiment: -0.7
   max_atr_pct_for_full_risk: 0.08
   conflict_penalty: 0.20
+  max_confidence_drop_on_conflict: 0.75
+  max_data_gap_ratio_for_trade: 0.05
+  require_micro_for_buy: true
   max_position_size: 0.20
   min_position_size: 0.02
 
 stability:
   min_decision_hold_cycles: 2
   min_cycles_between_flips: 2
+  min_cycles_between_non_hold_signals: 1

@@ -125,6 +125,13 @@ def _price_data_quality_ok(data, min_points=40, max_missing_ratio=0.05):
     return missing_ratio <= float(max_missing_ratio)
 
 
+def _price_data_gap_ratio(data):
+    if data is None or data.empty or "Close" not in data:
+        return 1.0
+    close = data["Close"]
+    return float(close.isna().mean())
+
+
 def _agreement_confidence(trend_score, sentiment, event_score):
     signs = []
     for v in [trend_score, sentiment, event_score]:
@@ -156,6 +163,7 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
         min_points=quality_cfg.get("min_price_points", 40),
         max_missing_ratio=quality_cfg.get("max_missing_ratio", 0.05),
     )
+    data_gap_ratio = _price_data_gap_ratio(data)
     trend_signal = Signal(
         name="trend",
         value=trend_score,
@@ -235,7 +243,13 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
             "volatility": volatility_signal,
         }
     )
-    return trend, has_upcoming_earnings, signals, {"rel_volume": rel_volume}
+    return trend, has_upcoming_earnings, signals, {
+        "rel_volume": rel_volume,
+        "micro_available": micro_available,
+        "data_quality_ok": price_ok,
+        "data_gap_ratio": data_gap_ratio,
+        "article_count": len(headlines),
+    }
 
 
 def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, cycle_idx=0, apply_stability_gate=False):
@@ -246,7 +260,12 @@ def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, c
     )
     weights = SCORING_CONFIG.get("weights", {})
     score = weighted_score(signals, weights)
-    signal_confidence, conflicts = aggregate_confidence(signals, SCORING_CONFIG.get("risk", {}).get("conflict_penalty", 0.2))
+    signal_confidence, conflicts = aggregate_confidence(
+        signals,
+        SCORING_CONFIG.get("risk", {}).get("conflict_penalty", 0.2),
+        weights=weights,
+        max_conflict_drop=SCORING_CONFIG.get("risk", {}).get("max_confidence_drop_on_conflict", 0.75),
+    )
     signal_confidence = clamp(signal_confidence, 0.0, 1.0)
     event_score = float(signals["events"].value)
     sentiment = float(signals["sentiment"].value)
