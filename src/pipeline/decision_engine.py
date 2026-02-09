@@ -78,6 +78,14 @@ def _fallback_config() -> dict[str, Any]:
             "min_cycles_between_flips": 2,
             "min_cycles_between_non_hold_signals": 1,
         },
+        "veto": {
+            "enabled": True,
+            "block_on_any_guardrail": True,
+            "max_conflict_for_trade": 0.7,
+            "require_trend_alignment": True,
+            "min_quality_signals_for_trade": 3,
+            "min_confidence_for_trade": 0.45,
+        },
     }
 
 
@@ -202,6 +210,55 @@ def hard_guardrails(
     return reasons
 
 
+def veto_decision(
+    proposed_decision: str,
+    confidence: float,
+    signals: dict[str, Signal],
+    guardrail_reasons: list[str],
+    local_conflict: float,
+    cfg: dict[str, Any],
+) -> tuple[str, list[str]]:
+    veto_cfg = cfg.get("veto", {})
+    if not bool(veto_cfg.get("enabled", True)):
+        return proposed_decision, []
+
+    vetoes: list[str] = []
+    if proposed_decision == "HOLD":
+        return "HOLD", vetoes
+
+    if bool(veto_cfg.get("block_on_any_guardrail", True)) and guardrail_reasons:
+        vetoes.append("veto:guardrail")
+
+    max_conflict_for_trade = float(veto_cfg.get("max_conflict_for_trade", 0.7))
+    if local_conflict >= max_conflict_for_trade:
+        vetoes.append("veto:high_conflict")
+
+    min_conf_trade = float(veto_cfg.get("min_confidence_for_trade", 0.45))
+    if confidence < min_conf_trade:
+        vetoes.append("veto:low_confidence")
+
+    min_quality_signals = int(veto_cfg.get("min_quality_signals_for_trade", 3))
+    usable_signals = sum(1 for s in signals.values() if s.quality_ok)
+    if usable_signals < min_quality_signals:
+        vetoes.append("veto:insufficient_signal_quality")
+
+    if bool(veto_cfg.get("require_trend_alignment", True)):
+        trend_value = float(signals.get("trend", Signal("trend", 0.0, 0.0, False)).value)
+        if proposed_decision == "BUY" and trend_value <= 0:
+            vetoes.append("veto:trend_misaligned")
+        if proposed_decision == "SELL" and trend_value >= 0:
+            vetoes.append("veto:trend_misaligned")
+
+    risk_cfg = cfg.get("risk", {})
+    sentiment_value = float(signals.get("sentiment", Signal("sentiment", 0.0, 0.0, False)).value)
+    if proposed_decision == "BUY" and sentiment_value <= float(risk_cfg.get("extreme_negative_sentiment", -0.7)):
+        vetoes.append("veto:extreme_negative_sentiment")
+
+    if vetoes:
+        return "HOLD", vetoes
+    return proposed_decision, vetoes
+
+
 def position_size(score: float, confidence: float, cfg: dict[str, Any]) -> float:
     risk_cfg = cfg.get("risk", {})
     min_size = float(risk_cfg.get("min_position_size", 0.02))
@@ -281,16 +338,10 @@ def decide(
     conflict_hold_t = float(thresholds.get("high_conflict_force_hold", 0.7))
 
     guardrail_reasons = hard_guardrails(signals, risk_context, cfg)
-    if guardrail_reasons:
-        reasons.extend(guardrail_reasons)
 
     local_conflict = conflict_ratio(signals)
-    if local_conflict >= conflict_hold_t:
-        reasons.append("conflict:high_disagreement")
 
-    if guardrail_reasons or local_conflict >= conflict_hold_t:
-        decision = "HOLD"
-    elif confidence < force_hold_conf:
+    if confidence < force_hold_conf:
         reasons.append("confidence:force_hold")
     else:
         if score >= buy_t:
@@ -299,14 +350,29 @@ def decide(
             decision = "SELL"
 
     if confidence < min_conf and decision != "HOLD":
-        decision = "HOLD"
         reasons.append("confidence:below_min")
 
     sentiment_value = float(signals.get("sentiment", Signal("sentiment", 0.0, 0.0, False)).value)
-    rel_volume = float(risk_context.get("rel_volume", 1.0))
     if decision == "BUY" and sentiment_value <= float(risk.get("extreme_negative_sentiment", -0.7)):
-        decision = "HOLD"
         reasons.append("risk:extreme_negative_sentiment")
+
+    if local_conflict >= conflict_hold_t:
+        reasons.append("conflict:high_disagreement")
+
+    if guardrail_reasons:
+        reasons.extend(guardrail_reasons)
+
+    vetoed_decision, veto_reasons = veto_decision(
+        proposed_decision=decision,
+        confidence=confidence,
+        signals=signals,
+        guardrail_reasons=guardrail_reasons,
+        local_conflict=local_conflict,
+        cfg=cfg,
+    )
+    if veto_reasons:
+        reasons.extend(veto_reasons)
+    decision = vetoed_decision
 
     decision, stability_reason = apply_stability(ticker, decision, state, cycle_idx, cfg)
     if stability_reason:

@@ -6,6 +6,7 @@ from src.pipeline.decision_engine import (
     decide,
     hard_guardrails,
     normalize_signals,
+    veto_decision,
     weighted_score,
 )
 
@@ -35,6 +36,14 @@ class DecisionEngineTests(unittest.TestCase):
                 "min_decision_hold_cycles": 1,
                 "min_cycles_between_flips": 1,
                 "min_cycles_between_non_hold_signals": 1,
+            },
+            "veto": {
+                "enabled": True,
+                "block_on_any_guardrail": True,
+                "max_conflict_for_trade": 0.7,
+                "require_trend_alignment": True,
+                "min_quality_signals_for_trade": 3,
+                "min_confidence_for_trade": 0.45,
             },
         }
 
@@ -177,6 +186,24 @@ class DecisionEngineTests(unittest.TestCase):
         )
         self.assertEqual(d3, "HOLD")
         self.assertIn("stability:min_non_hold_gap", reasons)
+
+    def test_veto_layer_blocks_misaligned_buy(self):
+        cfg = self._cfg()
+        signals = {
+            "trend": Signal("trend", -0.4, 0.9, True),
+            "sentiment": Signal("sentiment", 0.6, 0.8, True),
+            "events": Signal("events", 0.5, 0.7, True),
+        }
+        decision, reasons = veto_decision(
+            proposed_decision="BUY",
+            confidence=0.9,
+            signals=signals,
+            guardrail_reasons=[],
+            local_conflict=0.1,
+            cfg=cfg,
+        )
+        self.assertEqual(decision, "HOLD")
+        self.assertIn("veto:trend_misaligned", reasons)
 
 
 if __name__ == "__main__":

@@ -35,3 +35,11 @@ stability:
   min_decision_hold_cycles: 2
   min_cycles_between_flips: 2
   min_cycles_between_non_hold_signals: 1
+
+veto:
+  enabled: true
+  block_on_any_guardrail: true
+  max_conflict_for_trade: 0.7
+  require_trend_alignment: true
+  min_quality_signals_for_trade: 3
+  min_confidence_for_trade: 0.45
