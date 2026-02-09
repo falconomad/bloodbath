@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
+ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY") or os.getenv("ALPHA_VANTAGE_API_KEY")
+ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
 
@@ -28,6 +30,103 @@ def _backoff_sleep(attempt, base_seconds=1.0):
     time.sleep(delay)
 
 
+def _alpha_symbol(ticker):
+    # Alpha Vantage uses dot notation for share classes (e.g. BRK.B).
+    return str(ticker).strip().replace("-", ".")
+
+
+def _period_to_days(period):
+    mapping = {
+        "1mo": 31,
+        "3mo": 93,
+        "6mo": 186,
+        "1y": 366,
+        "2y": 731,
+        "5y": 1827,
+    }
+    return mapping.get(period, 186)
+
+
+def _trim_period(frame, period):
+    if frame.empty:
+        return frame
+    cutoff = pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=_period_to_days(period))
+    out = frame[frame.index >= cutoff]
+    return out if not out.empty else frame
+
+
+def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=3):
+    if not ALPHAVANTAGE_KEY:
+        return pd.DataFrame()
+    if interval != "1d":
+        print(f"[data] {ticker}: alpha fallback skipped (unsupported interval={interval})")
+        return pd.DataFrame()
+
+    symbol = _alpha_symbol(ticker)
+    params = {
+        "function": "TIME_SERIES_DAILY",
+        "symbol": symbol,
+        "outputsize": "full",
+        "apikey": ALPHAVANTAGE_KEY,
+    }
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.get(ALPHAVANTAGE_URL, params=params, timeout=15)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            if attempt < max_retries:
+                print(f"[data] {ticker}: alpha request failed on attempt {attempt}/{max_retries}, retrying ({exc})")
+                _backoff_sleep(attempt, base_seconds=2.0)
+                continue
+            print(f"[data] {ticker}: alpha request failed ({exc})")
+            return pd.DataFrame()
+
+        if isinstance(payload, dict) and payload.get("Note"):
+            if attempt < max_retries:
+                print(f"[data] {ticker}: alpha rate limited on attempt {attempt}/{max_retries}, retrying")
+                _backoff_sleep(attempt, base_seconds=12.0)
+                continue
+            print(f"[data] {ticker}: alpha rate limited after {max_retries} attempts")
+            return pd.DataFrame()
+
+        series = payload.get("Time Series (Daily)") if isinstance(payload, dict) else None
+        if not isinstance(series, dict) or not series:
+            print(f"[data] {ticker}: alpha response missing daily series")
+            return pd.DataFrame()
+
+        frame = pd.DataFrame.from_dict(series, orient="index")
+        rename_map = {
+            "1. open": "Open",
+            "2. high": "High",
+            "3. low": "Low",
+            "4. close": "Close",
+            "5. volume": "Volume",
+        }
+        frame = frame.rename(columns=rename_map)
+
+        required = ["Open", "High", "Low", "Close", "Volume"]
+        if any(col not in frame.columns for col in required):
+            print(f"[data] {ticker}: alpha response missing required OHLCV columns")
+            return pd.DataFrame()
+
+        frame = frame[required]
+        frame.index = pd.to_datetime(frame.index, errors="coerce")
+        frame = frame[frame.index.notna()]
+        frame = frame.sort_index()
+
+        for col in required:
+            frame[col] = pd.to_numeric(frame[col], errors="coerce")
+
+        frame = frame.dropna(how="all")
+        frame = _trim_period(frame, period)
+        print(f"[data] {ticker}: alpha fallback rows={len(frame)} empty={frame.empty}")
+        return frame
+
+    return pd.DataFrame()
+
+
 def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
     for attempt in range(1, max_retries + 1):
         try:
@@ -39,6 +138,9 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
                 progress=False,
                 threads=False,
             )
+            if data.empty:
+                print(f"[data] {ticker}: yfinance returned empty frame")
+                break
             print(f"[data] {ticker}: price rows={len(data)} empty={data.empty}")
             return data
         except Exception as exc:
@@ -47,7 +149,11 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
                 _backoff_sleep(attempt)
                 continue
             print(f"[data] {ticker}: price fetch failed ({exc})")
-            return pd.DataFrame()
+            break
+
+    alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=2)
+    if not alpha.empty:
+        return alpha
     return pd.DataFrame()
 
 

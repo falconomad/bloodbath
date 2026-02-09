@@ -11,5 +11,6 @@ Features:
 Setup:
 
 1. Add `FINNHUB_API_KEY` in `.env`.
-2. `pip install -r requirements.txt`
-3. `streamlit run app.py`
+2. Optional fallback: add `ALPHAVANTAGE_API_KEY` (or `ALPHA_VANTAGE_API_KEY`) in `.env` to fetch prices when Yahoo is rate-limited.
+3. `pip install -r requirements.txt`
+4. `streamlit run app.py`

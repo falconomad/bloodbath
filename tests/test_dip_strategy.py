@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -91,6 +91,64 @@ class DipStrategyTests(unittest.TestCase):
         self.assertFalse(result["AAPL"].empty)
         self.assertFalse(result["MSFT"].empty)
         self.assertEqual(mock_get_price_data.call_count, 2)
+
+    @patch("src.api.data_fetcher.requests.get")
+    @patch("src.api.data_fetcher.ALPHAVANTAGE_KEY", "demo")
+    @patch("yfinance.download")
+    def test_get_price_data_uses_alpha_vantage_when_yfinance_empty(self, mock_download, mock_requests_get):
+        mock_download.return_value = pd.DataFrame()
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "Time Series (Daily)": {
+                "2026-02-06": {
+                    "1. open": "100.0",
+                    "2. high": "101.0",
+                    "3. low": "99.0",
+                    "4. close": "100.5",
+                    "5. volume": "123456",
+                },
+                "2026-02-07": {
+                    "1. open": "101.0",
+                    "2. high": "102.0",
+                    "3. low": "100.0",
+                    "4. close": "101.5",
+                    "5. volume": "123457",
+                },
+            }
+        }
+        mock_requests_get.return_value = mock_response
+
+        result = data_fetcher.get_price_data("AAPL", period="1mo", interval="1d", max_retries=1)
+
+        self.assertFalse(result.empty)
+        self.assertIn("Close", result.columns)
+        self.assertEqual(mock_requests_get.call_count, 1)
+
+    @patch("src.api.data_fetcher.requests.get")
+    @patch("src.api.data_fetcher.ALPHAVANTAGE_KEY", "demo")
+    @patch("yfinance.download")
+    def test_alpha_vantage_symbol_conversion_for_share_class(self, mock_download, mock_requests_get):
+        mock_download.return_value = pd.DataFrame()
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "Time Series (Daily)": {
+                "2026-02-07": {
+                    "1. open": "500.0",
+                    "2. high": "505.0",
+                    "3. low": "495.0",
+                    "4. close": "503.0",
+                    "5. volume": "9000",
+                }
+            }
+        }
+        mock_requests_get.return_value = mock_response
+
+        data_fetcher.get_price_data("BRK-B", period="1mo", interval="1d", max_retries=1)
+
+        call = mock_requests_get.call_args
+        self.assertEqual(call.kwargs["params"]["symbol"], "BRK.B")
 
 
 if __name__ == "__main__":
