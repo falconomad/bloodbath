@@ -34,6 +34,18 @@ if is_dark:
     metric_bg_2 = "#1b2a2a"
     metric_bg_3 = "#232033"
     plot_template = "plotly_dark"
+    pie_palette = [
+        "#4D8DFF",
+        "#3CCFCF",
+        "#7BD389",
+        "#F2C14E",
+        "#FF8C69",
+        "#C084FC",
+        "#5EEAD4",
+        "#A3E635",
+        "#F97316",
+        "#F43F5E",
+    ]
 else:
     bg = "#f3f4f6"
     card = "#ffffff"
@@ -50,6 +62,18 @@ else:
     metric_bg_2 = "#f5faf8"
     metric_bg_3 = "#f8f7ff"
     plot_template = "plotly_white"
+    pie_palette = [
+        "#2F6DF6",
+        "#10B981",
+        "#F59E0B",
+        "#EF4444",
+        "#8B5CF6",
+        "#06B6D4",
+        "#84CC16",
+        "#F97316",
+        "#EC4899",
+        "#6366F1",
+    ]
 
 st.markdown(
     f"""
@@ -474,14 +498,7 @@ if not positions.empty:
             hole=0.52,
             title="Allocation Mix",
             template=plot_template,
-            color_discrete_sequence=[
-                "#c8dbff",
-                "#d4e3ff",
-                "#dae8ff",
-                "#e3edff",
-                "#eaf2ff",
-                "#f2f6ff",
-            ],
+            color_discrete_sequence=pie_palette,
         )
         alloc_fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card)
         st.plotly_chart(alloc_fig, use_container_width=True)
