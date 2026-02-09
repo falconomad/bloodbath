@@ -4,6 +4,7 @@ from src.analysis.technicals import calculate_technicals
 from src.analysis.events import score_events
 from src.analysis.dip import dip_bonus
 import pandas as pd
+from datetime import datetime, timezone
 
 
 def _as_float(value):
@@ -131,26 +132,45 @@ from src.settings import (
     SIGNAL_SELL_THRESHOLD,
     RECOMMENDATION_DECISION_THRESHOLD,
     TRADE_MODE,
+    FETCH_BATCH_SIZE,
 )
 
 print(
     f"[config] TRADE_MODE={TRADE_MODE} "
     f"SIGNAL_BUY_THRESHOLD={SIGNAL_BUY_THRESHOLD} SIGNAL_SELL_THRESHOLD={SIGNAL_SELL_THRESHOLD} "
-    f"TOP20_MIN_BUY_SCORE={TOP20_MIN_BUY_SCORE}"
+    f"TOP20_MIN_BUY_SCORE={TOP20_MIN_BUY_SCORE} FETCH_BATCH_SIZE={FETCH_BATCH_SIZE}"
 )
 
 top20_manager = Top20AutoManager(starting_capital=TOP20_STARTING_CAPITAL, min_buy_score=TOP20_MIN_BUY_SCORE)
 
 
+def _rotation_index(num_chunks, now=None):
+    current = now or datetime.now(timezone.utc)
+    slot = (current.hour * 2) + (current.minute // 30)
+    key = current.date().toordinal() * 48 + slot
+    return key % max(num_chunks, 1)
+
+
+def _rotating_fetch_universe(tickers, batch_size):
+    if batch_size <= 0 or batch_size >= len(tickers):
+        return tickers
+    chunks = [tickers[i : i + batch_size] for i in range(0, len(tickers), batch_size)]
+    idx = _rotation_index(len(chunks))
+    selected = chunks[idx]
+    print(f"[cycle] Rotating fetch chunk {idx + 1}/{len(chunks)} (batch_size={batch_size}, tickers={len(selected)})")
+    return selected
+
+
 def _build_candidate_list(universe_size=120, dip_scan_size=60):
     base_universe = get_sp500_universe()
     universe_slice = base_universe[:universe_size]
+    fetch_universe = _rotating_fetch_universe(universe_slice, FETCH_BATCH_SIZE)
     dip_candidates = []
 
-    print(f"[cycle] Building candidates from {len(universe_slice)} tickers")
-    price_map = get_bulk_price_data(universe_slice, period="6mo", interval="1d")
+    print(f"[cycle] Building candidates from {len(fetch_universe)} tickers")
+    price_map = get_bulk_price_data(fetch_universe, period="6mo", interval="1d")
 
-    for ticker in universe_slice:
+    for ticker in fetch_universe:
         data = price_map.get(ticker)
         if data is None:
             print(f"[cycle] {ticker}: missing bulk price data (None)")

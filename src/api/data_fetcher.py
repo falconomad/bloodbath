@@ -21,6 +21,9 @@ _alpha_status_logged = False
 _yf_rate_limit_logged = False
 _alpha_rate_limit_logged = False
 _alpha_error_logged = False
+_finnhub_status_logged = False
+_finnhub_rate_limit_logged = False
+_finnhub_error_logged = False
 
 
 def _cache_dir():
@@ -93,6 +96,88 @@ def _trim_period(frame, period):
     cutoff = pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=_period_to_days(period))
     out = frame[frame.index >= cutoff]
     return out if not out.empty else frame
+
+
+def _finnhub_resolution(interval):
+    if interval == "1d":
+        return "D"
+    return None
+
+
+def _finnhub_window_unix(period):
+    now = int(time.time())
+    days = _period_to_days(period)
+    start = now - (days * 24 * 60 * 60)
+    return start, now
+
+
+def _get_price_data_from_finnhub(ticker, period="6mo", interval="1d"):
+    global _finnhub_status_logged, _finnhub_rate_limit_logged, _finnhub_error_logged
+
+    if not FINNHUB_KEY:
+        if not _finnhub_status_logged:
+            print("[data] finnhub price fallback disabled (missing FINNHUB_API_KEY)")
+            _finnhub_status_logged = True
+        return pd.DataFrame()
+
+    resolution = _finnhub_resolution(interval)
+    if resolution is None:
+        if not _finnhub_error_logged:
+            print(f"[data] finnhub fallback skipped (unsupported interval={interval})")
+            _finnhub_error_logged = True
+        return pd.DataFrame()
+
+    if not _finnhub_status_logged:
+        print("[data] finnhub price fallback enabled")
+        _finnhub_status_logged = True
+
+    start, end = _finnhub_window_unix(period)
+    try:
+        payload = client.stock_candles(ticker, resolution, start, end)
+    except Exception as exc:
+        message = str(exc).lower()
+        if ("429" in message or "rate limit" in message) and not _finnhub_rate_limit_logged:
+            print("[data] finnhub rate limited; skipping finnhub fallback for this cycle")
+            _finnhub_rate_limit_logged = True
+        elif not _finnhub_error_logged:
+            print(f"[data] finnhub request failed (sample ticker={ticker}): {exc}")
+            _finnhub_error_logged = True
+        return pd.DataFrame()
+
+    if not isinstance(payload, dict):
+        return pd.DataFrame()
+
+    status = payload.get("s")
+    if status != "ok":
+        # no_data is common when window/symbol has no candles.
+        if status == "no_data":
+            return pd.DataFrame()
+        if not _finnhub_error_logged:
+            print(f"[data] finnhub bad status (sample ticker={ticker}, status={status})")
+            _finnhub_error_logged = True
+        return pd.DataFrame()
+
+    timestamps = payload.get("t", [])
+    if not timestamps:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(
+        {
+            "Open": payload.get("o", []),
+            "High": payload.get("h", []),
+            "Low": payload.get("l", []),
+            "Close": payload.get("c", []),
+            "Volume": payload.get("v", []),
+        },
+        index=pd.to_datetime(timestamps, unit="s"),
+    )
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    frame = frame.dropna(how="all").sort_index()
+    frame = _trim_period(frame, period)
+    if not frame.empty:
+        print(f"[data] {ticker}: finnhub rows={len(frame)}")
+    return frame
 
 
 def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=1):
@@ -182,6 +267,11 @@ def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_
 
 def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
     global _yf_rate_limit_logged
+    finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
+    if not finnhub_data.empty:
+        _save_price_cache(ticker, period, interval, finnhub_data)
+        return finnhub_data
+
     for attempt in range(1, max_retries + 1):
         try:
             data = yf.download(
@@ -250,6 +340,12 @@ def _fallback_single_ticker_fetch(tickers, period, interval):
 def _fallback_alpha_or_cache_only(tickers, period, interval):
     output = {}
     for ticker in tickers:
+        finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
+        if not finnhub_data.empty:
+            _save_price_cache(ticker, period, interval, finnhub_data)
+            output[ticker] = finnhub_data
+            continue
+
         alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=1)
         if not alpha.empty:
             _save_price_cache(ticker, period, interval, alpha)

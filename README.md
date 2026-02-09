@@ -17,5 +17,7 @@ Setup:
    - `NORMAL` defaults: `SIGNAL_BUY_THRESHOLD=1.0`, `SIGNAL_SELL_THRESHOLD=-1.0`, `TOP20_MIN_BUY_SCORE=0.75`
    - `AGGRESSIVE` defaults: `SIGNAL_BUY_THRESHOLD=0.55`, `SIGNAL_SELL_THRESHOLD=-0.7`, `TOP20_MIN_BUY_SCORE=0.45`
    - You can override any threshold directly with env vars if needed.
-5. `pip install -r requirements.txt`
-6. `streamlit run app.py`
+5. Optional rotating fetch: `FETCH_BATCH_SIZE` (default `20`, which means no rotation for TOP20).
+   - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
+6. `pip install -r requirements.txt`
+7. `streamlit run app.py`

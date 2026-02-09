@@ -38,6 +38,7 @@ jobs:
           SIGNAL_BUY_THRESHOLD: ${{ vars.SIGNAL_BUY_THRESHOLD }}
           SIGNAL_SELL_THRESHOLD: ${{ vars.SIGNAL_SELL_THRESHOLD }}
           TOP20_MIN_BUY_SCORE: ${{ vars.TOP20_MIN_BUY_SCORE }}
+          FETCH_BATCH_SIZE: ${{ vars.FETCH_BATCH_SIZE }}
         run: |
           echo "[runner] starting worker script execution"
           python worker/auto_worker.py

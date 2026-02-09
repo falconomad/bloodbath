@@ -12,6 +12,16 @@ def _float_from_env(name, default):
         return float(default)
 
 
+def _int_from_env(name, default):
+    raw = os.getenv(name)
+    if raw is None:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError:
+        return int(default)
+
+
 def _str_from_env(name, default):
     raw = os.getenv(name)
     if raw is None:
@@ -40,3 +50,6 @@ RECOMMENDATION_DECISION_THRESHOLD = _float_from_env(
 
 # Trading engine knobs.
 TOP20_MIN_BUY_SCORE = _float_from_env("TOP20_MIN_BUY_SCORE", 0.75 if TRADE_MODE == "NORMAL" else 0.45)
+
+# Fetch pacing for free-tier data providers.
+FETCH_BATCH_SIZE = _int_from_env("FETCH_BATCH_SIZE", 20)
