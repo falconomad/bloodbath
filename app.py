@@ -480,16 +480,41 @@ if not positions.empty:
     viz_col1, viz_col2 = st.columns([1, 1])
 
     with viz_col1:
+        alloc_view = positions.sort_values("market_value", ascending=False).copy()
+        pull = [0.06 if i < 2 else 0.0 for i in range(len(alloc_view))]
         alloc_fig = px.pie(
-            positions,
+            alloc_view,
             names="ticker",
             values="market_value",
-            hole=0.52,
+            hole=0.62,
             title="Allocation Mix",
             template=plot_template,
             color_discrete_sequence=pie_palette,
         )
-        alloc_fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card)
+        alloc_fig.update_traces(
+            pull=pull,
+            sort=False,
+            textposition="inside",
+            texttemplate="%{percent}",
+            marker=dict(line=dict(color=card, width=2)),
+            hovertemplate="<b>%{label}</b><br>Value: $%{value:,.2f}<br>Weight: %{percent}<extra></extra>",
+        )
+        alloc_fig.update_layout(
+            height=360,
+            margin=dict(l=10, r=10, t=50, b=20),
+            paper_bgcolor=card,
+            showlegend=True,
+            legend=dict(orientation="v", y=0.95),
+            annotations=[
+                dict(
+                    text=f"<b>${alloc_view['market_value'].sum():,.0f}</b><br><span style='font-size:11px'>invested • {len(alloc_view)} positions</span>",
+                    x=0.5,
+                    y=0.5,
+                    showarrow=False,
+                    font=dict(color=text, size=13),
+                )
+            ],
+        )
         st.plotly_chart(alloc_fig, use_container_width=True)
 
     with viz_col2:
