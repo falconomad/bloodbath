@@ -31,6 +31,22 @@ def _safe_news(news):
     return [n for n in news if isinstance(n, str) and n.strip()]
 
 
+def _recent_growth_score(data, lookback=20):
+    if data is None or data.empty or "Close" not in data:
+        return 0.0
+    close = data["Close"].dropna()
+    if len(close) < 2:
+        return 0.0
+    window = close.tail(lookback + 1)
+    if len(window) < 2:
+        window = close.tail(2)
+    start = float(window.iloc[0])
+    end = float(window.iloc[-1])
+    if start <= 0:
+        return 0.0
+    return (end - start) / start
+
+
 def generate_recommendation(ticker, price_data=None, news=None):
     data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
@@ -251,6 +267,8 @@ def run_top20_cycle_with_signals():
                 "decision": decision,
                 "score": round(final_score, 4),
                 "price": price,
+                "sentiment": float(rec.get("sentiment", 0.0)),
+                "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
             }
         )
 
@@ -270,6 +288,8 @@ def run_top20_cycle_with_signals():
                 "decision": "HOLD",
                 "score": 0.0,
                 "price": price,
+                "sentiment": 0.0,
+                "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
             }
         )
         print(f"[cycle] {ticker}: mark-to-market price={price:.2f}")

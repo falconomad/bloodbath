@@ -45,6 +45,16 @@ class Top20AutoManager:
     def _is_valid_price(self, price):
         return price is not None and math.isfinite(float(price)) and float(price) > 0
 
+    def _buy_weight(self, candidate):
+        score = max(float(candidate.get("score", 0.0)), 0.0)
+        sentiment = float(candidate.get("sentiment", 0.0))
+        growth = float(candidate.get("growth_20d", 0.0))
+
+        # Blend conviction (score), sentiment, and recent growth into a positive weight.
+        sentiment_factor = max(0.6, min(1.4, 1.0 + (0.30 * sentiment)))
+        growth_factor = max(0.7, min(1.5, 1.0 + (0.80 * growth)))
+        return max(score * sentiment_factor * growth_factor, 1e-6)
+
     def _buy(self, timestamp, ticker, price, budget):
         if not self._is_valid_price(price) or budget <= 0 or self.cash <= 0:
             return 0.0
@@ -199,14 +209,21 @@ class Top20AutoManager:
             cap_per_position = equity * self.max_allocation_per_position
             exposure_budget_remaining = min(self.cash, equity * self.max_new_exposure_per_step)
 
-            for idx, candidate in enumerate(new_candidates):
-                if exposure_budget_remaining <= 0:
-                    break
-                remaining = len(new_candidates) - idx
-                budget_split = self.cash / max(remaining, 1)
-                budget = min(budget_split, cap_per_position, exposure_budget_remaining)
-                spent = self._buy(timestamp, ticker=candidate["ticker"], price=float(candidate["price"]), budget=budget)
-                exposure_budget_remaining -= spent
+            if new_candidates and exposure_budget_remaining > 0:
+                weights = [self._buy_weight(c) for c in new_candidates]
+                total_weight = sum(weights) if weights else 0.0
+                planned_new_budget = exposure_budget_remaining
+                for candidate, weight in zip(new_candidates, weights):
+                    if exposure_budget_remaining <= 0:
+                        break
+                    target_budget = (
+                        planned_new_budget * (weight / total_weight)
+                        if total_weight > 0
+                        else planned_new_budget / max(len(new_candidates), 1)
+                    )
+                    budget = min(target_budget, cap_per_position, self.cash, exposure_budget_remaining)
+                    spent = self._buy(timestamp, ticker=candidate["ticker"], price=float(candidate["price"]), budget=budget)
+                    exposure_budget_remaining -= spent
 
             # 3) Opportunistic averaging-up for strong signals if under-allocated.
             for candidate in buy_candidates:

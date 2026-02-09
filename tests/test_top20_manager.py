@@ -151,6 +151,34 @@ class Top20ManagerTests(unittest.TestCase):
         ])
         self.assertIn("AAA", manager.holdings)
 
+    def test_allocates_more_to_higher_weighted_buy_candidates(self):
+        manager = Top20AutoManager(starting_capital=1000, max_positions=3, max_allocation_per_position=0.8)
+
+        manager.step(
+            [
+                {
+                    "ticker": "AAA",
+                    "decision": "BUY",
+                    "score": 2.0,
+                    "price": 100.0,
+                    "sentiment": 0.8,
+                    "growth_20d": 0.12,
+                },
+                {
+                    "ticker": "BBB",
+                    "decision": "BUY",
+                    "score": 1.2,
+                    "price": 100.0,
+                    "sentiment": -0.2,
+                    "growth_20d": -0.03,
+                },
+            ]
+        )
+
+        aaa_value = manager.holdings["AAA"]["shares"] * manager.last_price_by_ticker["AAA"]
+        bbb_value = manager.holdings["BBB"]["shares"] * manager.last_price_by_ticker["BBB"]
+        self.assertGreater(aaa_value, bbb_value)
+
 
 if __name__ == "__main__":
     unittest.main()
