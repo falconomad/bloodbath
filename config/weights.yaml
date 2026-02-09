@@ -1,0 +1,31 @@
+weights:
+  trend: 0.35
+  sentiment: 0.25
+  events: 0.15
+  micro: 0.10
+  dip: 0.10
+  volatility: 0.05
+
+thresholds:
+  buy_score: 0.45
+  sell_score: -0.45
+  min_confidence: 0.45
+  force_hold_confidence: 0.35
+
+quality:
+  min_price_points: 40
+  max_missing_ratio: 0.05
+  min_news_articles: 3
+  min_sentiment_articles: 4
+
+risk:
+  min_rel_volume_for_buy: 0.75
+  extreme_negative_sentiment: -0.7
+  max_atr_pct_for_full_risk: 0.08
+  conflict_penalty: 0.20
+  max_position_size: 0.20
+  min_position_size: 0.02
+
+stability:
+  min_decision_hold_cycles: 2
+  min_cycles_between_flips: 2

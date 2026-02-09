@@ -9,3 +9,4 @@ plotly
 python-dotenv
 finnhub-python
 psycopg2-binary
+PyYAML
