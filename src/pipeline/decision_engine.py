@@ -66,6 +66,10 @@ def _fallback_config() -> dict[str, Any]:
             "min_rel_volume_for_buy": 0.75,
             "extreme_negative_sentiment": -0.7,
             "max_atr_pct_for_full_risk": 0.08,
+            "volatility_low_atr_pct": 0.02,
+            "volatility_high_atr_pct": 0.08,
+            "volatility_confidence_penalty_max": 0.35,
+            "volatility_position_scale_min": 0.35,
             "conflict_penalty": 0.20,
             "max_confidence_drop_on_conflict": 0.75,
             "max_data_gap_ratio_for_trade": 0.05,
@@ -259,12 +263,36 @@ def veto_decision(
     return proposed_decision, vetoes
 
 
-def position_size(score: float, confidence: float, cfg: dict[str, Any]) -> float:
+def volatility_adjustment(risk_context: dict[str, Any], cfg: dict[str, Any]) -> tuple[float, float, str]:
+    risk_cfg = cfg.get("risk", {})
+    atr_pct = float(risk_context.get("atr_pct", 0.0))
+    if atr_pct <= 0:
+        return 1.0, 1.0, "unknown"
+
+    low = float(risk_cfg.get("volatility_low_atr_pct", 0.02))
+    high = max(float(risk_cfg.get("volatility_high_atr_pct", 0.08)), low + 1e-6)
+    conf_penalty_max = clamp(float(risk_cfg.get("volatility_confidence_penalty_max", 0.35)), 0.0, 0.95)
+    pos_scale_min = clamp(float(risk_cfg.get("volatility_position_scale_min", 0.35)), 0.0, 1.0)
+
+    if atr_pct <= low:
+        return 1.0, 1.0, "low"
+    if atr_pct >= high:
+        return 1.0 - conf_penalty_max, pos_scale_min, "high"
+
+    t = (atr_pct - low) / (high - low)
+    conf_mult = 1.0 - (conf_penalty_max * t)
+    pos_mult = 1.0 - ((1.0 - pos_scale_min) * t)
+    return clamp(conf_mult, 0.0, 1.0), clamp(pos_mult, 0.0, 1.0), "medium"
+
+
+def position_size(score: float, confidence: float, cfg: dict[str, Any], position_scale: float = 1.0) -> float:
     risk_cfg = cfg.get("risk", {})
     min_size = float(risk_cfg.get("min_position_size", 0.02))
     max_size = float(risk_cfg.get("max_position_size", 0.20))
     conviction = clamp(abs(score) * confidence, 0.0, 1.0)
-    return round(min_size + (max_size - min_size) * conviction, 4)
+    raw_size = min_size + (max_size - min_size) * conviction
+    scaled = raw_size * clamp(position_scale, 0.0, 1.0)
+    return round(clamp(scaled, 0.0, max_size), 4)
 
 
 def apply_stability(
@@ -341,7 +369,11 @@ def decide(
 
     local_conflict = conflict_ratio(signals)
 
-    if confidence < force_hold_conf:
+    conf_mult, pos_mult, vol_regime = volatility_adjustment(risk_context, cfg)
+    adjusted_confidence = clamp(confidence * conf_mult, 0.0, 1.0)
+    reasons.append(f"volatility:{vol_regime}")
+
+    if adjusted_confidence < force_hold_conf:
         reasons.append("confidence:force_hold")
     else:
         if score >= buy_t:
@@ -349,7 +381,7 @@ def decide(
         elif score <= sell_t:
             decision = "SELL"
 
-    if confidence < min_conf and decision != "HOLD":
+    if adjusted_confidence < min_conf and decision != "HOLD":
         reasons.append("confidence:below_min")
 
     sentiment_value = float(signals.get("sentiment", Signal("sentiment", 0.0, 0.0, False)).value)
@@ -364,7 +396,7 @@ def decide(
 
     vetoed_decision, veto_reasons = veto_decision(
         proposed_decision=decision,
-        confidence=confidence,
+        confidence=adjusted_confidence,
         signals=signals,
         guardrail_reasons=guardrail_reasons,
         local_conflict=local_conflict,
@@ -378,7 +410,7 @@ def decide(
     if stability_reason:
         reasons.append(stability_reason)
 
-    size = 0.0 if decision != "BUY" else position_size(score, confidence, cfg)
+    size = 0.0 if decision != "BUY" else position_size(score, adjusted_confidence, cfg, position_scale=pos_mult)
     return decision, reasons, size
 
 

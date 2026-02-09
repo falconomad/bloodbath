@@ -7,6 +7,7 @@ from src.pipeline.decision_engine import (
     hard_guardrails,
     normalize_signals,
     veto_decision,
+    volatility_adjustment,
     weighted_score,
 )
 
@@ -26,6 +27,10 @@ class DecisionEngineTests(unittest.TestCase):
                 "min_rel_volume_for_buy": 0.75,
                 "min_position_size": 0.02,
                 "max_position_size": 0.20,
+                "volatility_low_atr_pct": 0.02,
+                "volatility_high_atr_pct": 0.08,
+                "volatility_confidence_penalty_max": 0.35,
+                "volatility_position_scale_min": 0.35,
                 "max_data_gap_ratio_for_trade": 0.05,
                 "require_micro_for_buy": True,
                 "conflict_penalty": 0.2,
@@ -204,6 +209,58 @@ class DecisionEngineTests(unittest.TestCase):
         )
         self.assertEqual(decision, "HOLD")
         self.assertIn("veto:trend_misaligned", reasons)
+
+    def test_volatility_adjustment_regimes(self):
+        cfg = self._cfg()
+        low = volatility_adjustment({"atr_pct": 0.01}, cfg)
+        medium = volatility_adjustment({"atr_pct": 0.05}, cfg)
+        high = volatility_adjustment({"atr_pct": 0.12}, cfg)
+        self.assertEqual(low[2], "low")
+        self.assertEqual(high[2], "high")
+        self.assertEqual(medium[2], "medium")
+        self.assertLess(high[0], low[0])
+        self.assertLess(high[1], low[1])
+
+    def test_high_volatility_reduces_buy_position_size(self):
+        cfg = self._cfg()
+        signals = {
+            "trend": Signal("trend", 0.8, 0.9, True),
+            "sentiment": Signal("sentiment", 0.6, 0.8, True),
+            "events": Signal("events", 0.5, 0.8, True),
+        }
+        _, _, low_size = decide(
+            ticker="AAA",
+            score=0.8,
+            confidence=0.9,
+            signals=signals,
+            risk_context={
+                "rel_volume": 1.2,
+                "data_quality_ok": True,
+                "data_gap_ratio": 0.0,
+                "micro_available": True,
+                "atr_pct": 0.01,
+            },
+            state={},
+            cycle_idx=1,
+            cfg=cfg,
+        )
+        _, _, high_size = decide(
+            ticker="BBB",
+            score=0.8,
+            confidence=0.9,
+            signals=signals,
+            risk_context={
+                "rel_volume": 1.2,
+                "data_quality_ok": True,
+                "data_gap_ratio": 0.0,
+                "micro_available": True,
+                "atr_pct": 0.12,
+            },
+            state={},
+            cycle_idx=1,
+            cfg=cfg,
+        )
+        self.assertGreater(low_size, high_size)
 
 
 if __name__ == "__main__":

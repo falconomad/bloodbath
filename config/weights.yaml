@@ -24,6 +24,10 @@ risk:
   min_rel_volume_for_buy: 0.75
   extreme_negative_sentiment: -0.7
   max_atr_pct_for_full_risk: 0.08
+  volatility_low_atr_pct: 0.02
+  volatility_high_atr_pct: 0.08
+  volatility_confidence_penalty_max: 0.35
+  volatility_position_scale_min: 0.35
   conflict_penalty: 0.20
   max_confidence_drop_on_conflict: 0.75
   max_data_gap_ratio_for_trade: 0.05

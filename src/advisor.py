@@ -248,6 +248,7 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
         "micro_available": micro_available,
         "data_quality_ok": price_ok,
         "data_gap_ratio": data_gap_ratio,
+        "atr_pct": _atr_percent(data, period=14),
         "article_count": len(headlines),
     }
 
