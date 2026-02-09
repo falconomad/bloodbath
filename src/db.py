@@ -61,6 +61,19 @@ def init_db():
     """
     )
 
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_signals (
+            time TEXT,
+            ticker TEXT,
+            decision TEXT,
+            score REAL,
+            price REAL
+        );
+    """
+    )
+
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS worker_runs (

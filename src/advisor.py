@@ -174,7 +174,7 @@ def _build_candidate_list(universe_size=120, dip_scan_size=60):
     return final
 
 
-def run_top20_cycle():
+def run_top20_cycle_with_signals():
     analyses = []
     candidates = _build_candidate_list()
 
@@ -208,4 +208,9 @@ def run_top20_cycle():
         top20_manager.step(analyses)
 
     positions = top20_manager.position_snapshot_df()
-    return top20_manager.history_df(), top20_manager.transactions_df(), positions
+    return top20_manager.history_df(), top20_manager.transactions_df(), positions, analyses
+
+
+def run_top20_cycle():
+    history, transactions, positions, _analyses = run_top20_cycle_with_signals()
+    return history, transactions, positions

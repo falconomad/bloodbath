@@ -9,7 +9,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.db import claim_worker_run, get_connection, init_db
-from src.advisor import run_top20_cycle
+from src.advisor import run_top20_cycle_with_signals
 
 DB_AVAILABLE = True
 
@@ -21,7 +21,7 @@ except Exception as exc:
     print(f"Database initialization failed; continuing without persistence: {exc}")
 
 
-def save(history, transactions, positions):
+def save(history, transactions, positions, analyses):
     if not DB_AVAILABLE:
         print("Skipping DB save because database is unavailable.")
         return
@@ -68,6 +68,20 @@ def save(history, transactions, positions):
                 ),
             )
 
+    if analyses:
+        c.execute("DELETE FROM recommendation_signals")
+        for a in analyses:
+            c.execute(
+                "INSERT INTO recommendation_signals (time, ticker, decision, score, price) VALUES (%s, %s, %s, %s, %s)",
+                (
+                    datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S"),
+                    a["ticker"],
+                    a["decision"],
+                    float(a["score"]),
+                    float(a["price"]),
+                ),
+            )
+
     conn.commit()
     c.close()
     conn.close()
@@ -93,8 +107,8 @@ def main():
             print(f"Run key {run_key} already processed; skipping duplicate execution.")
             return
 
-    history, transactions, positions = run_top20_cycle()
-    save(history, transactions, positions)
+    history, transactions, positions, analyses = run_top20_cycle_with_signals()
+    save(history, transactions, positions, analyses)
     print("Cycle complete.")
 
 
