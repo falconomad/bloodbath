@@ -1,5 +1,4 @@
 import os
-import random
 import time
 from pathlib import Path
 from datetime import date, timedelta
@@ -13,17 +12,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
-ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY") or os.getenv("ALPHA_VANTAGE_API_KEY")
-ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET")
 ALPACA_DATA_BASE_URL = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets/v2")
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
-_alpha_status_logged = False
 _yf_rate_limit_logged = False
-_alpha_rate_limit_logged = False
-_alpha_error_logged = False
 _finnhub_status_logged = False
 _finnhub_rate_limit_logged = False
 _finnhub_error_logged = False
@@ -71,17 +65,6 @@ def _is_rate_limited(exc):
     name = exc.__class__.__name__
     message = str(exc).lower()
     return name == "YFRateLimitError" or "too many requests" in message or "rate limit" in message
-
-
-def _backoff_sleep(attempt, base_seconds=1.0):
-    # Exponential backoff with jitter keeps retries from stampeding Yahoo endpoints.
-    delay = base_seconds * (2 ** max(0, attempt - 1)) + random.uniform(0, 0.25)
-    time.sleep(delay)
-
-
-def _alpha_symbol(ticker):
-    # Alpha Vantage uses dot notation for share classes (e.g. BRK.B).
-    return str(ticker).strip().replace("-", ".")
 
 
 def _alpaca_symbol(ticker):
@@ -270,91 +253,6 @@ def _get_price_data_from_alpaca(ticker, period="6mo", interval="1d"):
     return frame
 
 
-def _get_price_data_from_alpha_vantage(ticker, period="6mo", interval="1d", max_retries=1):
-    global _alpha_status_logged, _alpha_rate_limit_logged, _alpha_error_logged
-    if not ALPHAVANTAGE_KEY:
-        if not _alpha_status_logged:
-            print("[data] alpha fallback disabled (missing ALPHAVANTAGE_API_KEY / ALPHA_VANTAGE_API_KEY)")
-            _alpha_status_logged = True
-        return pd.DataFrame()
-    if not _alpha_status_logged:
-        print("[data] alpha fallback enabled")
-        _alpha_status_logged = True
-    if interval != "1d":
-        print(f"[data] {ticker}: alpha fallback skipped (unsupported interval={interval})")
-        return pd.DataFrame()
-
-    symbol = _alpha_symbol(ticker)
-    params = {
-        "function": "TIME_SERIES_DAILY",
-        "symbol": symbol,
-        "outputsize": "compact",
-        "apikey": ALPHAVANTAGE_KEY,
-    }
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = requests.get(ALPHAVANTAGE_URL, params=params, timeout=15)
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:
-            print(f"[data] alpha request failed for {ticker} ({exc})")
-            return pd.DataFrame()
-
-        if isinstance(payload, dict):
-            if payload.get("Note"):
-                if not _alpha_rate_limit_logged:
-                    print("[data] alpha rate limited; skipping alpha fallback for this cycle")
-                    _alpha_rate_limit_logged = True
-                return pd.DataFrame()
-            if payload.get("Information") and not _alpha_error_logged:
-                print(f"[data] alpha info: {payload.get('Information')}")
-                _alpha_error_logged = True
-                return pd.DataFrame()
-            if payload.get("Error Message") and not _alpha_error_logged:
-                print(f"[data] alpha error: {payload.get('Error Message')}")
-                _alpha_error_logged = True
-                return pd.DataFrame()
-
-        series = payload.get("Time Series (Daily)") if isinstance(payload, dict) else None
-        if not isinstance(series, dict) or not series:
-            if not _alpha_error_logged:
-                keys = list(payload.keys()) if isinstance(payload, dict) else []
-                print(f"[data] alpha response missing daily series (sample ticker={ticker}, keys={keys})")
-                _alpha_error_logged = True
-            return pd.DataFrame()
-
-        frame = pd.DataFrame.from_dict(series, orient="index")
-        rename_map = {
-            "1. open": "Open",
-            "2. high": "High",
-            "3. low": "Low",
-            "4. close": "Close",
-            "5. volume": "Volume",
-        }
-        frame = frame.rename(columns=rename_map)
-
-        required = ["Open", "High", "Low", "Close", "Volume"]
-        if any(col not in frame.columns for col in required):
-            print(f"[data] {ticker}: alpha response missing required OHLCV columns")
-            return pd.DataFrame()
-
-        frame = frame[required]
-        frame.index = pd.to_datetime(frame.index, errors="coerce")
-        frame = frame[frame.index.notna()]
-        frame = frame.sort_index()
-
-        for col in required:
-            frame[col] = pd.to_numeric(frame[col], errors="coerce")
-
-        frame = frame.dropna(how="all")
-        frame = _trim_period(frame, period)
-        print(f"[data] {ticker}: alpha fallback rows={len(frame)}")
-        return frame
-
-    return pd.DataFrame()
-
-
 def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
     global _yf_rate_limit_logged
     finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
@@ -379,7 +277,7 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
             )
             if data.empty:
                 if not _yf_rate_limit_logged:
-                    print("[data] yfinance returned empty/rate-limited data; falling back to alpha/cache")
+                    print("[data] yfinance returned empty/rate-limited data; falling back to cache")
                     _yf_rate_limit_logged = True
                 break
             print(f"[data] {ticker}: price rows={len(data)}")
@@ -388,16 +286,11 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
         except Exception as exc:
             if _is_rate_limited(exc):
                 if not _yf_rate_limit_logged:
-                    print("[data] yfinance rate limited; falling back to alpha/cache")
+                    print("[data] yfinance rate limited; falling back to cache")
                     _yf_rate_limit_logged = True
                 break
             print(f"[data] yfinance price fetch failed for {ticker} ({exc})")
             break
-
-    alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=2)
-    if not alpha.empty:
-        _save_price_cache(ticker, period, interval, alpha)
-        return alpha
 
     cached = _load_price_cache(ticker, period, interval)
     if not cached.empty:
@@ -432,7 +325,7 @@ def _fallback_single_ticker_fetch(tickers, period, interval):
     return output
 
 
-def _fallback_alpha_or_cache_only(tickers, period, interval):
+def _fallback_providers_or_cache_only(tickers, period, interval):
     output = {}
     for ticker in tickers:
         finnhub_data = _get_price_data_from_finnhub(ticker, period=period, interval=interval)
@@ -447,17 +340,11 @@ def _fallback_alpha_or_cache_only(tickers, period, interval):
             output[ticker] = alpaca_data
             continue
 
-        alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=1)
-        if not alpha.empty:
-            _save_price_cache(ticker, period, interval, alpha)
-            output[ticker] = alpha
-            continue
-
         cached = _load_price_cache(ticker, period, interval)
         output[ticker] = cached if not cached.empty else pd.DataFrame()
 
     empty_count = sum(1 for frame in output.values() if frame.empty)
-    print(f"[data] alpha/cache fallback complete: total={len(output)} empty={empty_count}")
+    print(f"[data] provider/cache fallback complete: total={len(output)} empty={empty_count}")
     return output
 
 
@@ -478,14 +365,14 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
         )
     except Exception as exc:
         if _is_rate_limited(exc):
-            print(f"[data] bulk price fetch rate limited for {len(tickers)} tickers; falling back to alpha/cache")
-            return _fallback_alpha_or_cache_only(tickers, period, interval)
+            print(f"[data] bulk price fetch rate limited for {len(tickers)} tickers; falling back to providers/cache")
+            return _fallback_providers_or_cache_only(tickers, period, interval)
         print(f"[data] bulk price fetch failed for {len(tickers)} tickers ({exc})")
         return _fallback_single_ticker_fetch(tickers, period, interval)
 
     if frame.empty:
-        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers; falling back to alpha/cache")
-        return _fallback_alpha_or_cache_only(tickers, period, interval)
+        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers; falling back to providers/cache")
+        return _fallback_providers_or_cache_only(tickers, period, interval)
 
     # MultiIndex columns when multiple symbols are fetched.
     if isinstance(frame.columns, pd.MultiIndex):

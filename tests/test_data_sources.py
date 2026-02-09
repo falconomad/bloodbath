@@ -18,7 +18,6 @@ class DataSourceTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["symbol"], "AAPL")
 
-    @patch("src.api.data_fetcher.ALPHAVANTAGE_KEY", None)
     @patch("yfinance.download")
     def test_get_price_data_uses_recent_cache_when_live_fetch_fails(self, mock_download):
         mock_download.side_effect = [pd.DataFrame({"Close": [100.0, 101.0]}), pd.DataFrame()]
@@ -56,7 +55,7 @@ class DataSourceTests(unittest.TestCase):
     def test_get_price_data_falls_back_when_finnhub_no_data(self, mock_client):
         mock_client.stock_candles.return_value = {"s": "no_data"}
 
-        with patch("src.api.data_fetcher._get_price_data_from_alpha_vantage", return_value=pd.DataFrame({"Close": [1.0]})):
+        with patch("src.api.data_fetcher._get_price_data_from_alpaca", return_value=pd.DataFrame({"Close": [1.0]})):
             frame = data_fetcher.get_price_data("AAPL", period="1mo", interval="1d")
 
         self.assertFalse(frame.empty)
