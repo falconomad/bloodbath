@@ -21,12 +21,8 @@ Setup:
 5. Optional execution realism:
    - `TOP20_SLIPPAGE_BPS` (default `5.0`)
    - `TOP20_FEE_BPS` (default `1.0`)
-   These are applied to buys/sells and impact both live simulation and backtests.
+   These are applied to buys/sells in simulation.
 6. Optional rotating fetch: `FETCH_BATCH_SIZE` (default `20`, which means no rotation for TOP20).
    - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
 7. `pip install -r requirements.txt`
 8. `streamlit run app.py`
-
-Backtesting:
-- Single run metrics: `python worker/backtest_runner.py`
-- Parameter sweep (ranked by excess return with drawdown constraint): `python worker/backtest_sweep_runner.py`
