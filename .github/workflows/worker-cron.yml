@@ -25,7 +25,9 @@ jobs:
 
       - name: Install worker dependencies
         run: |
+          echo "[runner] installing worker dependencies"
           pip install --disable-pip-version-check --no-input -r worker/requirements-worker.txt
+          echo "[runner] dependency installation complete"
 
       - name: Run worker script
         env:
@@ -37,4 +39,6 @@ jobs:
           SIGNAL_SELL_THRESHOLD: ${{ vars.SIGNAL_SELL_THRESHOLD }}
           TOP20_MIN_BUY_SCORE: ${{ vars.TOP20_MIN_BUY_SCORE }}
         run: |
+          echo "[runner] starting worker script execution"
           python worker/auto_worker.py
+          echo "[runner] worker script execution complete"

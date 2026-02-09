@@ -11,6 +11,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.db import claim_worker_run, get_connection, init_db
 from src.advisor import run_top20_cycle_with_signals
+from src.settings import TRADE_MODE
 
 DB_AVAILABLE = True
 
@@ -24,8 +25,13 @@ except Exception as exc:
 
 def save(history, transactions, positions, analyses):
     if not DB_AVAILABLE:
-        print("Skipping DB save because database is unavailable.")
+        print("[worker][save] skipped: database unavailable")
         return
+
+    print(
+        f"[worker][save] start: history_rows={len(history)} transactions_rows={len(transactions)} "
+        f"positions_rows={len(positions)} analyses={len(analyses)}"
+    )
 
     conn = get_connection()
     c = conn.cursor()
@@ -86,6 +92,7 @@ def save(history, transactions, positions, analyses):
     conn.commit()
     c.close()
     conn.close()
+    print("[worker][save] complete")
 
 
 print("GitHub Actions worker starting one execution cycle...")
@@ -106,29 +113,39 @@ def _truthy(value):
 
 
 def main():
+    event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower() or "local"
+    print(f"[worker][start] event={event_name} trade_mode={TRADE_MODE}")
+
     if DB_AVAILABLE:
-        event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
         force_run = _truthy(os.getenv("FORCE_WORKER_RUN", "0"))
         skip_dedupe = event_name == "workflow_dispatch" or force_run
 
         if skip_dedupe:
-            print(f"[worker] dedupe bypassed (event={event_name or 'local'}, force_run={force_run})")
+            print(f"[worker][dedupe] bypassed: event={event_name} force_run={force_run}")
         else:
             run_key = build_run_key()
+            print(f"[worker][dedupe] checking run_key={run_key}")
             if not claim_worker_run(run_key):
-                print(f"Run key {run_key} already processed; skipping duplicate execution.")
+                print(f"[worker][dedupe] skip: run_key={run_key} already processed")
                 return
+            print(f"[worker][dedupe] acquired run_key={run_key}")
+    else:
+        print("[worker][dedupe] skipped: database unavailable")
 
+    print("[worker][cycle] starting analysis cycle")
     history, transactions, positions, analyses = run_top20_cycle_with_signals()
     print(
-        f"[worker] results: history_rows={len(history)}, transactions_rows={len(transactions)}, "
+        f"[worker][cycle] complete: history_rows={len(history)}, transactions_rows={len(transactions)}, "
         f"positions_rows={len(positions)}, analyses={len(analyses)}"
     )
     if analyses:
         sample = analyses[:5]
-        print(f"[worker] sample analyses (up to 5): {sample}")
+        print(f"[worker][cycle] sample analyses (up to 5): {sample}")
+    else:
+        print("[worker][cycle] no analyses generated")
+
     save(history, transactions, positions, analyses)
-    print("Cycle complete.")
+    print("[worker][done] cycle complete")
 
 
 if __name__ == "__main__":
