@@ -26,6 +26,9 @@ if is_dark:
     panel = "#141821"
     muted_text = "#9ca7bb"
     accent = "#4d8dff"
+    up_color = "#2ecc71"
+    down_color = "#ff6b6b"
+    neutral_color = "#9ca7bb"
     accent_soft = "rgba(77, 141, 255, 0.15)"
     metric_bg_1 = "#1b2333"
     metric_bg_2 = "#1b2a2a"
@@ -39,6 +42,9 @@ else:
     panel = "#ffffff"
     muted_text = "#6f7684"
     accent = "#2f6df6"
+    up_color = "#1b9e4b"
+    down_color = "#d93025"
+    neutral_color = "#6f7684"
     accent_soft = "rgba(47, 109, 246, 0.08)"
     metric_bg_1 = "#f7f9ff"
     metric_bg_2 = "#f5faf8"
@@ -283,6 +289,27 @@ def show_dashboard_skeleton():
     )
 
 
+def _color_signed(v):
+    try:
+        n = float(v)
+    except Exception:
+        return ""
+    if n > 0:
+        return f"color: {up_color}; font-weight: 600;"
+    if n < 0:
+        return f"color: {down_color}; font-weight: 600;"
+    return f"color: {neutral_color};"
+
+
+def _color_decision(v):
+    value = str(v).upper()
+    if value == "BUY":
+        return f"color: {up_color}; font-weight: 700;"
+    if value == "SELL":
+        return f"color: {down_color}; font-weight: 700;"
+    return f"color: {neutral_color}; font-weight: 600;"
+
+
 skeleton_placeholder = st.empty()
 with skeleton_placeholder.container():
     show_dashboard_skeleton()
@@ -353,12 +380,27 @@ with st.sidebar:
     st.markdown("**Recent Transactions**")
     if not transactions.empty:
         sidebar_tx = transactions.sort_values("time", ascending=False).head(8)
+        if "action" in sidebar_tx.columns:
+            sidebar_tx["action"] = sidebar_tx["action"].astype(str).str.upper()
+        if "value" not in sidebar_tx.columns and {"shares", "price"}.issubset(sidebar_tx.columns):
+            sidebar_tx["value"] = sidebar_tx["shares"] * sidebar_tx["price"]
         tx_cols = [
             col
             for col in ["time", "ticker", "action", "shares", "price", "value"]
             if col in sidebar_tx.columns
         ]
-        st.dataframe(sidebar_tx[tx_cols], use_container_width=True, hide_index=True)
+        tx_style_map = {}
+        if "action" in tx_cols:
+            tx_style_map["action"] = _color_decision
+        if "value" in tx_cols:
+            tx_style_map["value"] = _color_signed
+        styled_sidebar_tx = sidebar_tx[tx_cols].style.format(
+            {"shares": "{:.4f}", "price": "{:.2f}", "value": "{:.2f}"}
+        )
+        if tx_style_map:
+            styled_sidebar_tx = styled_sidebar_tx.map(tx_style_map.get("action", lambda _: ""), subset=["action"] if "action" in tx_cols else [])
+            styled_sidebar_tx = styled_sidebar_tx.map(tx_style_map.get("value", lambda _: ""), subset=["value"] if "value" in tx_cols else [])
+        st.dataframe(styled_sidebar_tx, use_container_width=True, hide_index=True)
     else:
         st.caption("No transaction history yet.")
 
@@ -388,13 +430,19 @@ else:
 st.subheader("Top Signals (Closest to Trade Trigger)")
 if not signals.empty:
     signal_view = signals.copy()
+    if "decision" in signal_view.columns:
+        signal_view["decision"] = signal_view["decision"].astype(str).str.upper()
     signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
     signal_cols = [col for col in ["time", "ticker", "decision", "score", "price", "distance_to_trigger"] if col in signal_view.columns]
-    st.dataframe(
-        signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]),
-        use_container_width=True,
-        hide_index=True,
+    signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False])
+    signal_style = signal_table.style.format(
+        {"score": "{:.3f}", "price": "{:.2f}", "distance_to_trigger": "{:.3f}"}
     )
+    if "score" in signal_cols:
+        signal_style = signal_style.map(_color_signed, subset=["score"])
+    if "decision" in signal_cols:
+        signal_style = signal_style.map(_color_decision, subset=["decision"])
+    st.dataframe(signal_style, use_container_width=True, hide_index=True)
 else:
     st.caption("No latest signal data yet.")
 
@@ -435,7 +483,12 @@ if not positions.empty:
             color="pnl_pct_display",
             title="Position P/L %",
             template=plot_template,
-            color_continuous_scale=["#d4def7", "#c8d8fb", "#aac5fa", accent],
+            color_continuous_midpoint=0,
+            color_continuous_scale=[
+                [0.0, down_color],
+                [0.5, "#bfc7d6" if is_dark else "#cfd6e2"],
+                [1.0, up_color],
+            ],
         )
         pnl_fig.update_layout(height=360, coloraxis_showscale=False, margin=dict(l=10, r=10, t=50, b=20), paper_bgcolor=card, plot_bgcolor=card)
         st.plotly_chart(pnl_fig, use_container_width=True)
@@ -462,24 +515,33 @@ if not positions.empty:
         }
     )
 
-    st.dataframe(
-        clean_table.style.format(
-            {
-                "avg_cost($)": "{:.2f}",
-                "price($)": "{:.2f}",
-                "market_value($)": "{:.2f}",
-                "allocation(%)": "{:.2f}",
-                "pnl($)": "{:.2f}",
-                "pnl(%)": "{:.2f}",
-            }
-        ),
-        use_container_width=True,
-    )
+    styled_positions = clean_table.style.format(
+        {
+            "avg_cost($)": "{:.2f}",
+            "price($)": "{:.2f}",
+            "market_value($)": "{:.2f}",
+            "allocation(%)": "{:.2f}",
+            "pnl($)": "{:.2f}",
+            "pnl(%)": "{:.2f}",
+        }
+    ).map(_color_signed, subset=["pnl($)", "pnl(%)"])
+    st.dataframe(styled_positions, use_container_width=True)
 else:
     st.info("No open positions snapshot available yet.")
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
-        st.dataframe(transactions, use_container_width=True)
+        tx = transactions.copy()
+        if "action" in tx.columns:
+            tx["action"] = tx["action"].astype(str).str.upper()
+        if "value" not in tx.columns and {"shares", "price"}.issubset(tx.columns):
+            tx["value"] = tx["shares"] * tx["price"]
+
+        tx_style = tx.style.format({"shares": "{:.4f}", "price": "{:.2f}", "value": "{:.2f}"})
+        if "action" in tx.columns:
+            tx_style = tx_style.map(_color_decision, subset=["action"])
+        if "value" in tx.columns:
+            tx_style = tx_style.map(_color_signed, subset=["value"])
+        st.dataframe(tx_style, use_container_width=True)
     else:
         st.write("No transactions yet.")

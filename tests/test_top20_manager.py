@@ -124,6 +124,33 @@ class Top20ManagerTests(unittest.TestCase):
 
         self.assertNotIn("AAA", manager.holdings)
 
+    def test_cooldown_prevents_immediate_reentry_after_sell(self):
+        manager = Top20AutoManager(
+            starting_capital=500,
+            max_positions=2,
+            max_allocation_per_position=0.6,
+            cooldown_after_sell_steps=1,
+        )
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0},
+        ])
+        manager.step([
+            {"ticker": "AAA", "decision": "SELL", "score": -2.0, "price": 90.0},
+        ])
+        self.assertNotIn("AAA", manager.holdings)
+
+        # Immediate next step BUY should be blocked by cooldown.
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 92.0},
+        ])
+        self.assertNotIn("AAA", manager.holdings)
+
+        # Re-entry allowed once cooldown expires.
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 94.0},
+        ])
+        self.assertIn("AAA", manager.holdings)
+
 
 if __name__ == "__main__":
     unittest.main()

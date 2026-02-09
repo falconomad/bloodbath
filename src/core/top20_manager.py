@@ -11,15 +11,23 @@ class Top20AutoManager:
         max_allocation_per_position=0.35,
         stop_loss_pct=0.12,
         take_profit_pct=0.30,
+        min_buy_score=0.75,
+        cooldown_after_sell_steps=1,
+        max_new_exposure_per_step=1.0,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
         self.max_allocation_per_position = float(max_allocation_per_position)
         self.stop_loss_pct = float(stop_loss_pct)
         self.take_profit_pct = float(take_profit_pct)
+        self.min_buy_score = float(min_buy_score)
+        self.cooldown_after_sell_steps = int(cooldown_after_sell_steps)
+        self.max_new_exposure_per_step = float(max_new_exposure_per_step)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
+        self.last_sell_step_by_ticker = {}
+        self.step_index = 0
         self.history = []
         self.transactions = []
 
@@ -39,11 +47,11 @@ class Top20AutoManager:
 
     def _buy(self, timestamp, ticker, price, budget):
         if not self._is_valid_price(price) or budget <= 0 or self.cash <= 0:
-            return
+            return 0.0
 
         shares = min(budget, self.cash) / price
         if shares <= 0 or shares < 1e-6:
-            return
+            return 0.0
 
         cost = shares * price
         self.cash -= cost
@@ -61,6 +69,7 @@ class Top20AutoManager:
             "peak_price": new_peak,
         }
         self._record(timestamp, ticker, "BUY", shares, price)
+        return cost
 
     def _sell_all(self, timestamp, ticker, price):
         if not self._is_valid_price(price):
@@ -74,6 +83,7 @@ class Top20AutoManager:
         self.cash += shares * price
         self._record(timestamp, ticker, "SELL", shares, price)
         self.holdings.pop(ticker, None)
+        self.last_sell_step_by_ticker[ticker] = self.step_index
 
     def _portfolio_value(self):
         total = self.cash
@@ -129,6 +139,8 @@ class Top20AutoManager:
         return pd.DataFrame(rows).sort_values("market_value", ascending=False)
 
     def step(self, analyses):
+        self.step_index += 1
+
         if not analyses:
             self.history.append(self._portfolio_value())
             return
@@ -163,9 +175,18 @@ class Top20AutoManager:
         buy_candidates = [
             a
             for a in analyses
-            if a["decision"] == "BUY" and float(a.get("score", 0.0)) > 0 and self._is_valid_price(a["price"])
+            if a["decision"] == "BUY"
+            and float(a.get("score", 0.0)) >= self.min_buy_score
+            and self._is_valid_price(a["price"])
         ]
         buy_candidates.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+
+        buy_candidates = [
+            a
+            for a in buy_candidates
+            if (self.step_index - self.last_sell_step_by_ticker.get(a["ticker"], -10_000))
+            > self.cooldown_after_sell_steps
+        ]
 
         open_slots = max(self.max_positions - len(self.holdings), 0)
         new_candidates = [c for c in buy_candidates if c["ticker"] not in self.holdings][:open_slots]
@@ -173,15 +194,21 @@ class Top20AutoManager:
         if self.cash > 0:
             equity = self._portfolio_value()
             cap_per_position = equity * self.max_allocation_per_position
+            exposure_budget_remaining = min(self.cash, equity * self.max_new_exposure_per_step)
 
             for idx, candidate in enumerate(new_candidates):
+                if exposure_budget_remaining <= 0:
+                    break
                 remaining = len(new_candidates) - idx
                 budget_split = self.cash / max(remaining, 1)
-                budget = min(budget_split, cap_per_position)
-                self._buy(timestamp, ticker=candidate["ticker"], price=float(candidate["price"]), budget=budget)
+                budget = min(budget_split, cap_per_position, exposure_budget_remaining)
+                spent = self._buy(timestamp, ticker=candidate["ticker"], price=float(candidate["price"]), budget=budget)
+                exposure_budget_remaining -= spent
 
             # 3) Opportunistic averaging-up for strong signals if under-allocated.
             for candidate in buy_candidates:
+                if exposure_budget_remaining <= 0:
+                    break
                 ticker = candidate["ticker"]
                 if ticker not in self.holdings:
                     continue
@@ -189,12 +216,17 @@ class Top20AutoManager:
                     continue
 
                 price = float(candidate["price"])
+                avg_cost = float(self.holdings[ticker]["avg_cost"])
+                if price < avg_cost * 1.01:
+                    continue
+
                 market_value = self.holdings[ticker]["shares"] * price
                 room = max(cap_per_position - market_value, 0.0)
                 if room <= 0:
                     continue
-                budget = min(room, self.cash * 0.35)
-                self._buy(timestamp, ticker=ticker, price=price, budget=budget)
+                budget = min(room, self.cash * 0.35, exposure_budget_remaining)
+                spent = self._buy(timestamp, ticker=ticker, price=price, budget=budget)
+                exposure_budget_remaining -= spent
 
         self.history.append(self._portfolio_value())
 
