@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -100,12 +101,23 @@ def build_run_key(now=None):
     return f"{current.strftime('%Y-%m-%d')}-{current.hour:02d}-{bucket_minute:02d}"
 
 
+def _truthy(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main():
     if DB_AVAILABLE:
-        run_key = build_run_key()
-        if not claim_worker_run(run_key):
-            print(f"Run key {run_key} already processed; skipping duplicate execution.")
-            return
+        event_name = os.getenv("GITHUB_EVENT_NAME", "").strip().lower()
+        force_run = _truthy(os.getenv("FORCE_WORKER_RUN", "0"))
+        skip_dedupe = event_name == "workflow_dispatch" or force_run
+
+        if skip_dedupe:
+            print(f"[worker] dedupe bypassed (event={event_name or 'local'}, force_run={force_run})")
+        else:
+            run_key = build_run_key()
+            if not claim_worker_run(run_key):
+                print(f"Run key {run_key} already processed; skipping duplicate execution.")
+                return
 
     history, transactions, positions, analyses = run_top20_cycle_with_signals()
     print(
