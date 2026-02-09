@@ -51,7 +51,10 @@ class AdvisorSignalTests(unittest.TestCase):
 
         with patch("src.advisor._build_candidate_list", return_value=candidates), patch(
             "src.advisor.get_company_news", return_value=[]
-        ), patch("src.advisor.generate_recommendation", return_value={"composite_score": 0.9}), patch.object(
+        ), patch(
+            "src.advisor.generate_recommendation",
+            return_value={"composite_score": 0.9, "signal_confidence": 0.8, "sentiment": 0.0},
+        ), patch.object(
             advisor.top20_manager, "step"
         ), patch.object(advisor.top20_manager, "history_df", return_value=pd.DataFrame()), patch.object(
             advisor.top20_manager, "transactions_df", return_value=pd.DataFrame()
