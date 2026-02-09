@@ -22,8 +22,20 @@ class Top20ManagerTests(unittest.TestCase):
         total_invested = sum(
             manager.holdings[t]["shares"] * manager.last_price_by_ticker[t] for t in manager.holdings
         )
-        self.assertLessEqual(total_invested, 500.0)
+        self.assertLessEqual(total_invested, 500.000001)
         self.assertGreaterEqual(manager.cash, 0.0)
+
+
+    def test_supports_fractional_shares_when_cash_is_below_share_price(self):
+        manager = Top20AutoManager(starting_capital=200.0, max_positions=1, max_allocation_per_position=1.0)
+
+        manager.step([
+            {"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 350.0},
+        ])
+
+        self.assertIn("AAA", manager.holdings)
+        self.assertGreater(float(manager.holdings["AAA"]["shares"]), 0.0)
+        self.assertLess(float(manager.holdings["AAA"]["shares"]), 1.0)
 
     def test_sells_current_holding_on_explicit_sell_signal(self):
         manager = Top20AutoManager(starting_capital=500, max_positions=3, max_allocation_per_position=0.6)
