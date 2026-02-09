@@ -14,7 +14,17 @@ load_dotenv()
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET")
-ALPACA_DATA_BASE_URL = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets/v2")
+
+
+def _env_non_empty(name, default):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = str(raw).strip()
+    return value if value else default
+
+
+ALPACA_DATA_BASE_URL = _env_non_empty("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets/v2")
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
 _yf_rate_limit_logged = False
@@ -70,6 +80,15 @@ def _is_rate_limited(exc):
 def _alpaca_symbol(ticker):
     # Alpaca market data uses dot notation for share classes.
     return str(ticker).strip().replace("-", ".")
+
+
+def _normalized_alpaca_base_url():
+    base = str(ALPACA_DATA_BASE_URL).strip()
+    if not base:
+        base = "https://data.alpaca.markets/v2"
+    if not base.startswith(("http://", "https://")):
+        base = f"https://{base.lstrip('/')}"
+    return base.rstrip("/")
 
 
 def _period_to_days(period):
@@ -200,7 +219,7 @@ def _get_price_data_from_alpaca(ticker, period="6mo", interval="1d"):
     end_iso = pd.to_datetime(end_ts, unit="s", utc=True).isoformat().replace("+00:00", "Z")
 
     symbol = _alpaca_symbol(ticker)
-    url = f"{ALPACA_DATA_BASE_URL.rstrip('/')}/stocks/{symbol}/bars"
+    url = f"{_normalized_alpaca_base_url()}/stocks/{symbol}/bars"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
