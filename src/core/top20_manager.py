@@ -16,6 +16,9 @@ class Top20AutoManager:
         max_new_exposure_per_step=1.0,
         slippage_bps=0.0,
         fee_bps=0.0,
+        sell_confirm_steps=2,
+        take_profit_partial_ratio=0.5,
+        trailing_atr_mult=2.5,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
@@ -27,10 +30,14 @@ class Top20AutoManager:
         self.max_new_exposure_per_step = float(max_new_exposure_per_step)
         self.slippage_bps = float(slippage_bps)
         self.fee_bps = float(fee_bps)
+        self.sell_confirm_steps = int(sell_confirm_steps)
+        self.take_profit_partial_ratio = float(take_profit_partial_ratio)
+        self.trailing_atr_mult = float(trailing_atr_mult)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
         self.last_sell_step_by_ticker = {}
+        self.sell_streak_by_ticker = {}
         self.step_index = 0
         self.history = []
         self.transactions = []
@@ -105,6 +112,38 @@ class Top20AutoManager:
         self._record(timestamp, ticker, "SELL", shares, exec_price)
         self.holdings.pop(ticker, None)
         self.last_sell_step_by_ticker[ticker] = self.step_index
+        self.sell_streak_by_ticker[ticker] = 0
+
+    def _sell_fraction(self, timestamp, ticker, price, fraction, action="SELL_PARTIAL"):
+        if not self._is_valid_price(price):
+            return
+        if fraction <= 0 or fraction >= 1:
+            return
+
+        position = self.holdings.get(ticker, {"shares": 0})
+        shares = float(position.get("shares", 0))
+        if shares <= 0 or shares < 1e-6:
+            return
+
+        sell_shares = shares * fraction
+        if sell_shares <= 0 or sell_shares < 1e-6:
+            return
+
+        exec_price = float(price) * (1.0 - (self.slippage_bps / 10_000.0))
+        proceeds = sell_shares * exec_price
+        fee = proceeds * (self.fee_bps / 10_000.0)
+        self.cash += proceeds - fee
+
+        remaining = shares - sell_shares
+        if remaining <= 1e-6:
+            self._record(timestamp, ticker, "SELL", shares, exec_price)
+            self.holdings.pop(ticker, None)
+            self.last_sell_step_by_ticker[ticker] = self.step_index
+            self.sell_streak_by_ticker[ticker] = 0
+            return
+
+        self.holdings[ticker]["shares"] = remaining
+        self._record(timestamp, ticker, action, sell_shares, exec_price)
 
     def _portfolio_value(self):
         total = self.cash
@@ -184,15 +223,39 @@ class Top20AutoManager:
             price = float(self.last_price_by_ticker.get(ticker, self.holdings[ticker]["avg_cost"]))
             position = self.holdings[ticker]
             avg_cost = float(position["avg_cost"])
+            atr_pct = max(float(rec.get("atr_pct", 0.0)), 0.0)
 
             if self._is_valid_price(price):
                 position["peak_price"] = max(float(position.get("peak_price", price)), price)
+            position.setdefault("tp1_taken", False)
 
-            stop_loss_triggered = price <= avg_cost * (1 - self.stop_loss_pct)
+            trailing_stop_pct = self.stop_loss_pct
+            if atr_pct > 0:
+                trailing_stop_pct = max(self.stop_loss_pct * 0.5, min(0.35, atr_pct * self.trailing_atr_mult))
+            trailing_stop = float(position.get("peak_price", price)) * (1 - trailing_stop_pct)
+            hard_stop = avg_cost * (1 - self.stop_loss_pct)
+
+            stop_loss_triggered = price <= max(hard_stop, trailing_stop)
             take_profit_triggered = price >= avg_cost * (1 + self.take_profit_pct)
-            explicit_sell = rec.get("decision") == "SELL"
 
-            if explicit_sell or stop_loss_triggered or take_profit_triggered:
+            if rec.get("decision") == "SELL":
+                self.sell_streak_by_ticker[ticker] = self.sell_streak_by_ticker.get(ticker, 0) + 1
+            else:
+                self.sell_streak_by_ticker[ticker] = 0
+            explicit_sell = self.sell_streak_by_ticker.get(ticker, 0) >= self.sell_confirm_steps
+
+            if take_profit_triggered and not position.get("tp1_taken", False):
+                self._sell_fraction(
+                    timestamp,
+                    ticker,
+                    price,
+                    fraction=self.take_profit_partial_ratio,
+                    action="SELL_PARTIAL_TP",
+                )
+                if ticker in self.holdings:
+                    self.holdings[ticker]["tp1_taken"] = True
+
+            if explicit_sell or stop_loss_triggered:
                 self._sell_all(timestamp, ticker, price)
 
         # 2) Open new BUY positions across strongest candidates.
