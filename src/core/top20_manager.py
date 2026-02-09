@@ -17,7 +17,7 @@ class Top20AutoManager:
         self.max_allocation_per_position = float(max_allocation_per_position)
         self.stop_loss_pct = float(stop_loss_pct)
         self.take_profit_pct = float(take_profit_pct)
-        # ticker -> {"shares": int, "avg_cost": float, "peak_price": float}
+        # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
         self.history = []
@@ -29,7 +29,7 @@ class Top20AutoManager:
                 "time": timestamp,
                 "ticker": ticker,
                 "action": action,
-                "shares": int(shares),
+                "shares": round(float(shares), 6),
                 "price": round(float(price), 2),
             }
         )
@@ -38,18 +38,18 @@ class Top20AutoManager:
         return price is not None and math.isfinite(float(price)) and float(price) > 0
 
     def _buy(self, timestamp, ticker, price, budget):
-        if not self._is_valid_price(price) or budget <= 0 or self.cash < price:
+        if not self._is_valid_price(price) or budget <= 0 or self.cash <= 0:
             return
 
-        shares = int(min(budget, self.cash) // price)
-        if shares <= 0:
+        shares = min(budget, self.cash) / price
+        if shares <= 0 or shares < 1e-6:
             return
 
         cost = shares * price
         self.cash -= cost
 
         position = self.holdings.get(ticker, {"shares": 0, "avg_cost": 0.0, "peak_price": float(price)})
-        prev_shares = int(position["shares"])
+        prev_shares = float(position["shares"])
         prev_cost_basis = prev_shares * float(position["avg_cost"])
         new_shares = prev_shares + shares
         new_avg_cost = (prev_cost_basis + cost) / new_shares
@@ -67,8 +67,8 @@ class Top20AutoManager:
             return
 
         position = self.holdings.get(ticker, {"shares": 0})
-        shares = int(position["shares"])
-        if shares <= 0:
+        shares = float(position["shares"])
+        if shares <= 0 or shares < 1e-6:
             return
 
         self.cash += shares * price
@@ -80,7 +80,7 @@ class Top20AutoManager:
         for ticker, position in self.holdings.items():
             price = self.last_price_by_ticker.get(ticker)
             if self._is_valid_price(price):
-                total += int(position["shares"]) * price
+                total += float(position["shares"]) * price
         return round(float(total), 4)
 
     def position_snapshot_df(self, timestamp=None):
@@ -103,7 +103,7 @@ class Top20AutoManager:
         equity = self._portfolio_value()
         rows = []
         for ticker, position in self.holdings.items():
-            shares = int(position["shares"])
+            shares = float(position["shares"])
             avg_cost = float(position["avg_cost"])
             current_price = float(self.last_price_by_ticker.get(ticker, avg_cost))
             market_value = shares * current_price

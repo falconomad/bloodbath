@@ -124,7 +124,7 @@ def run_sp500_cycle(decision, data):
 from src.core.sp500_list import TOP20, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
 
-top20_manager = Top20AutoManager(starting_capital=500)
+top20_manager = Top20AutoManager(starting_capital=2000)
 
 
 def _build_candidate_list(universe_size=120, dip_scan_size=60):
@@ -132,11 +132,16 @@ def _build_candidate_list(universe_size=120, dip_scan_size=60):
     universe_slice = base_universe[:universe_size]
     dip_candidates = []
 
+    print(f"[cycle] Building candidates from {len(universe_slice)} tickers")
     price_map = get_bulk_price_data(universe_slice, period="6mo", interval="1d")
 
     for ticker in universe_slice:
         data = price_map.get(ticker)
-        if data is None or data.empty:
+        if data is None:
+            print(f"[cycle] {ticker}: missing bulk price data (None)")
+            continue
+        if data.empty:
+            print(f"[cycle] {ticker}: data.empty=True in bulk price data")
             continue
 
         dip_score, drawdown, stabilized, volatility_penalty = dip_bonus(data)
@@ -146,6 +151,7 @@ def _build_candidate_list(universe_size=120, dip_scan_size=60):
         if drawdown >= 0.2:
             dip_candidates.append((ticker, data, dip_score, drawdown, stabilized, volatility_penalty))
 
+    print(f"[cycle] Dip candidates >=20% drawdown: {len(dip_candidates)}")
     dip_candidates.sort(key=lambda item: item[3], reverse=True)
     selected_dips = dip_candidates[:dip_scan_size]
 
@@ -178,15 +184,23 @@ def run_top20_cycle_with_signals():
     analyses = []
     candidates = _build_candidate_list()
 
+    print(f"[cycle] Evaluating {len(candidates)} candidate tickers")
     for ticker, meta in candidates.items():
         data = meta["data"] if meta["data"] is not None else get_price_data(ticker, period="6mo", interval="1d")
         if data.empty:
+            print(f"[cycle] {ticker}: skipped because data.empty=True after fetch")
             continue
 
         price = _as_float(data["Close"].iloc[-1])
         headlines = get_company_news(ticker)
+        print(f"[cycle] {ticker}: headlines={len(headlines)}")
         rec = generate_recommendation(ticker, price_data=data, news=headlines)
         final_score = rec["composite_score"] + meta["dip_score"] + meta["volatility_penalty"]
+
+        print(
+            f"[cycle] {ticker}: composite={rec['composite_score']:.4f}, "
+            f"dip={meta['dip_score']:.4f}, vol_penalty={meta['volatility_penalty']:.4f}, final={final_score:.4f}"
+        )
 
         if final_score > 1:
             decision = "BUY"
@@ -205,6 +219,10 @@ def run_top20_cycle_with_signals():
         )
 
     if analyses:
+        buys = sum(1 for a in analyses if a["decision"] == "BUY")
+        sells = sum(1 for a in analyses if a["decision"] == "SELL")
+        holds = sum(1 for a in analyses if a["decision"] == "HOLD")
+        print(f"[cycle] Signals => BUY:{buys} SELL:{sells} HOLD:{holds}")
         top20_manager.step(analyses)
 
     positions = top20_manager.position_snapshot_df()

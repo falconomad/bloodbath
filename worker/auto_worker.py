@@ -40,7 +40,7 @@ def save(history, transactions, positions, analyses):
         for _, t in transactions.iterrows():
             c.execute(
                 "INSERT INTO transactions (time, ticker, action, shares, price) VALUES (%s, %s, %s, %s, %s)",
-                (t["time"], t["ticker"], t["action"], int(t["shares"]), float(t["price"])),
+                (t["time"], t["ticker"], t["action"], float(t["shares"]), float(t["price"])),
             )
 
     if not positions.empty:
@@ -58,7 +58,7 @@ def save(history, transactions, positions, analyses):
                 (
                     p["time"],
                     p["ticker"],
-                    int(p["shares"]),
+                    float(p["shares"]),
                     float(p["avg_cost"]),
                     float(p["current_price"]),
                     float(p["market_value"]),
@@ -108,6 +108,13 @@ def main():
             return
 
     history, transactions, positions, analyses = run_top20_cycle_with_signals()
+    print(
+        f"[worker] results: history_rows={len(history)}, transactions_rows={len(transactions)}, "
+        f"positions_rows={len(positions)}, analyses={len(analyses)}"
+    )
+    if analyses:
+        sample = analyses[:5]
+        print(f"[worker] sample analyses (up to 5): {sample}")
     save(history, transactions, positions, analyses)
     print("Cycle complete.")
 

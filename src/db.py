@@ -39,7 +39,7 @@ def init_db():
             time TEXT,
             ticker TEXT,
             action TEXT,
-            shares INTEGER,
+            shares REAL,
             price REAL
         );
     """
@@ -50,7 +50,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS position_snapshots (
             time TEXT,
             ticker TEXT,
-            shares INTEGER,
+            shares REAL,
             avg_cost REAL,
             current_price REAL,
             market_value REAL,
@@ -82,6 +82,11 @@ def init_db():
         );
     """
     )
+
+
+    # Migration for fractional shares support.
+    cur.execute("ALTER TABLE transactions ALTER COLUMN shares TYPE REAL USING shares::REAL;")
+    cur.execute("ALTER TABLE position_snapshots ALTER COLUMN shares TYPE REAL USING shares::REAL;")
 
     conn.commit()
     cur.close()

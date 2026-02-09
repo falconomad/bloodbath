@@ -15,7 +15,9 @@ client = finnhub.Client(api_key=FINNHUB_KEY)
 
 
 def get_price_data(ticker, period="6mo", interval="1d"):
-    return yf.download(ticker, period=period, interval=interval)
+    data = yf.download(ticker, period=period, interval=interval, progress=False)
+    print(f"[data] {ticker}: price rows={len(data)} empty={data.empty}")
+    return data
 
 
 def get_company_news(ticker, lookback_days=7, limit=10):
@@ -28,8 +30,11 @@ def get_company_news(ticker, lookback_days=7, limit=10):
             to=to_date.isoformat(),
         )
         headlines = [n.get("headline", "").strip() for n in news]
-        return [h for h in headlines if h][:limit]
-    except Exception:
+        out = [h for h in headlines if h][:limit]
+        print(f"[data] {ticker}: news_count={len(out)}")
+        return out
+    except Exception as exc:
+        print(f"[data] {ticker}: company_news failed ({exc})")
         return []
 
 
@@ -48,10 +53,12 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
             progress=False,
             threads=True,
         )
-    except Exception:
+    except Exception as exc:
+        print(f"[data] bulk price fetch failed for {len(tickers)} tickers ({exc})")
         return {ticker: pd.DataFrame() for ticker in tickers}
 
     if frame.empty:
+        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers")
         return {ticker: pd.DataFrame() for ticker in tickers}
 
     # MultiIndex columns when multiple symbols are fetched.
@@ -63,11 +70,15 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
                 output[ticker] = data
             else:
                 output[ticker] = pd.DataFrame()
+        empty_count = sum(1 for d in output.values() if d.empty)
+        print(f"[data] bulk price fetch complete: total={len(output)} empty={empty_count}")
         return output
 
     # Single ticker fallback shape.
     ticker = tickers[0]
-    return {ticker: frame.dropna(how="all")}
+    output = {ticker: frame.dropna(how="all")}
+    print(f"[data] bulk single ticker fetch: {ticker} rows={len(output[ticker])} empty={output[ticker].empty}")
+    return output
 
 
 def get_earnings_calendar(ticker, lookahead_days=30):
@@ -81,9 +92,12 @@ def get_earnings_calendar(ticker, lookahead_days=30):
             symbol=ticker,
         )
         calendar = payload.get("earningsCalendar", []) if isinstance(payload, dict) else []
-        return calendar if isinstance(calendar, list) else []
+        out = calendar if isinstance(calendar, list) else []
+        print(f"[data] {ticker}: earnings_count={len(out)}")
+        return out
     except Exception:
         if not FINNHUB_KEY:
+            print(f"[data] {ticker}: earnings_calendar skipped (missing FINNHUB_API_KEY)")
             return []
 
     try:
@@ -100,6 +114,9 @@ def get_earnings_calendar(ticker, lookahead_days=30):
         response.raise_for_status()
         payload = response.json()
         calendar = payload.get("earningsCalendar", []) if isinstance(payload, dict) else []
-        return calendar if isinstance(calendar, list) else []
-    except Exception:
+        out = calendar if isinstance(calendar, list) else []
+        print(f"[data] {ticker}: earnings_count={len(out)}")
+        return out
+    except Exception as exc:
+        print(f"[data] {ticker}: earnings_calendar failed ({exc})")
         return []
