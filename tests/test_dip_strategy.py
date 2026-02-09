@@ -9,6 +9,9 @@ from src.core import sp500_list
 
 
 class DipStrategyTests(unittest.TestCase):
+    class YFRateLimitError(Exception):
+        pass
+
     def test_dip_bonus_requires_stabilization_for_full_boost(self):
         # 30% drawdown and still sliding in the latest week -> reduced bonus.
         data = pd.DataFrame({"Close": [100.0, 95.0, 90.0, 88.0, 85.0, 80.0, 75.0, 70.0]})
@@ -56,6 +59,38 @@ class DipStrategyTests(unittest.TestCase):
         self.assertIn("MSFT", result)
         self.assertFalse(result["AAPL"].empty)
         self.assertFalse(result["MSFT"].empty)
+
+    @patch("src.api.data_fetcher.time.sleep")
+    @patch("yfinance.download")
+    def test_get_price_data_retries_after_rate_limit(self, mock_download, _mock_sleep):
+        index = pd.date_range("2024-01-01", periods=2)
+        mock_download.side_effect = [
+            self.YFRateLimitError("Too Many Requests. Rate limited."),
+            pd.DataFrame({"Close": [100.0, 101.0]}, index=index),
+        ]
+
+        result = data_fetcher.get_price_data("AAPL", period="1mo", interval="1d", max_retries=2)
+
+        self.assertFalse(result.empty)
+        self.assertEqual(mock_download.call_count, 2)
+
+    @patch("src.api.data_fetcher.get_price_data")
+    @patch("yfinance.download")
+    def test_bulk_price_data_falls_back_when_bulk_empty(self, mock_download, mock_get_price_data):
+        mock_download.return_value = pd.DataFrame()
+        index = pd.date_range("2024-01-01", periods=2)
+        mock_get_price_data.side_effect = [
+            pd.DataFrame({"Close": [100.0, 101.0]}, index=index),
+            pd.DataFrame({"Close": [200.0, 201.0]}, index=index),
+        ]
+
+        result = data_fetcher.get_bulk_price_data(["AAPL", "MSFT"], period="1mo", interval="1d")
+
+        self.assertIn("AAPL", result)
+        self.assertIn("MSFT", result)
+        self.assertFalse(result["AAPL"].empty)
+        self.assertFalse(result["MSFT"].empty)
+        self.assertEqual(mock_get_price_data.call_count, 2)
 
 
 if __name__ == "__main__":

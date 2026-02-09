@@ -1,4 +1,6 @@
 import os
+import random
+import time
 from datetime import date, timedelta
 
 import finnhub
@@ -14,10 +16,39 @@ FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 client = finnhub.Client(api_key=FINNHUB_KEY)
 
 
-def get_price_data(ticker, period="6mo", interval="1d"):
-    data = yf.download(ticker, period=period, interval=interval, progress=False)
-    print(f"[data] {ticker}: price rows={len(data)} empty={data.empty}")
-    return data
+def _is_rate_limited(exc):
+    name = exc.__class__.__name__
+    message = str(exc).lower()
+    return name == "YFRateLimitError" or "too many requests" in message or "rate limit" in message
+
+
+def _backoff_sleep(attempt, base_seconds=1.0):
+    # Exponential backoff with jitter keeps retries from stampeding Yahoo endpoints.
+    delay = base_seconds * (2 ** max(0, attempt - 1)) + random.uniform(0, 0.25)
+    time.sleep(delay)
+
+
+def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
+    for attempt in range(1, max_retries + 1):
+        try:
+            data = yf.download(
+                ticker,
+                period=period,
+                interval=interval,
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+            print(f"[data] {ticker}: price rows={len(data)} empty={data.empty}")
+            return data
+        except Exception as exc:
+            if _is_rate_limited(exc) and attempt < max_retries:
+                print(f"[data] {ticker}: rate limited on attempt {attempt}/{max_retries}, retrying")
+                _backoff_sleep(attempt)
+                continue
+            print(f"[data] {ticker}: price fetch failed ({exc})")
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 
 def get_company_news(ticker, lookback_days=7, limit=10):
@@ -38,6 +69,15 @@ def get_company_news(ticker, lookback_days=7, limit=10):
         return []
 
 
+def _fallback_single_ticker_fetch(tickers, period, interval):
+    output = {}
+    for ticker in tickers:
+        output[ticker] = get_price_data(ticker, period=period, interval=interval, max_retries=2)
+    empty_count = sum(1 for frame in output.values() if frame.empty)
+    print(f"[data] single-ticker fallback complete: total={len(output)} empty={empty_count}")
+    return output
+
+
 def get_bulk_price_data(tickers, period="6mo", interval="1d"):
     """Fetch OHLCV data for multiple tickers in one yfinance call."""
     if not tickers:
@@ -51,15 +91,18 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
             group_by="ticker",
             auto_adjust=False,
             progress=False,
-            threads=True,
+            threads=False,
         )
     except Exception as exc:
+        if _is_rate_limited(exc):
+            print(f"[data] bulk price fetch rate limited for {len(tickers)} tickers; falling back to single fetches")
+            return _fallback_single_ticker_fetch(tickers, period, interval)
         print(f"[data] bulk price fetch failed for {len(tickers)} tickers ({exc})")
-        return {ticker: pd.DataFrame() for ticker in tickers}
+        return _fallback_single_ticker_fetch(tickers, period, interval)
 
     if frame.empty:
-        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers")
-        return {ticker: pd.DataFrame() for ticker in tickers}
+        print(f"[data] bulk price fetch returned empty frame for {len(tickers)} tickers; falling back to single fetches")
+        return _fallback_single_ticker_fetch(tickers, period, interval)
 
     # MultiIndex columns when multiple symbols are fetched.
     if isinstance(frame.columns, pd.MultiIndex):
