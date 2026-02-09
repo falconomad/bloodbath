@@ -1,6 +1,7 @@
 import os
 import random
 import time
+from pathlib import Path
 from datetime import date, timedelta
 
 import finnhub
@@ -16,6 +17,41 @@ ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY") or os.getenv("ALPHA_VANTAGE
 ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
 
 client = finnhub.Client(api_key=FINNHUB_KEY)
+
+
+def _cache_dir():
+    base = Path(os.getenv("PRICE_CACHE_DIR", ".cache/price_data"))
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _cache_path(ticker, period, interval):
+    safe = str(ticker).replace("/", "_").replace("\\", "_").replace(".", "_").replace("-", "_")
+    return _cache_dir() / f"{safe}_{period}_{interval}.pkl"
+
+
+def _save_price_cache(ticker, period, interval, frame):
+    if frame is None or frame.empty:
+        return
+    path = _cache_path(ticker, period, interval)
+    frame.to_pickle(path)
+
+
+def _load_price_cache(ticker, period, interval, max_age_hours=72):
+    path = _cache_path(ticker, period, interval)
+    if not path.exists():
+        return pd.DataFrame()
+    age_seconds = time.time() - path.stat().st_mtime
+    if age_seconds > (max_age_hours * 3600):
+        return pd.DataFrame()
+    try:
+        cached = pd.read_pickle(path)
+        if isinstance(cached, pd.DataFrame) and not cached.empty:
+            print(f"[data] {ticker}: using cached price data rows={len(cached)}")
+            return cached
+    except Exception as exc:
+        print(f"[data] {ticker}: cache load failed ({exc})")
+    return pd.DataFrame()
 
 
 def _is_rate_limited(exc):
@@ -142,6 +178,7 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
                 print(f"[data] {ticker}: yfinance returned empty frame")
                 break
             print(f"[data] {ticker}: price rows={len(data)} empty={data.empty}")
+            _save_price_cache(ticker, period, interval, data)
             return data
         except Exception as exc:
             if _is_rate_limited(exc) and attempt < max_retries:
@@ -153,7 +190,12 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=3):
 
     alpha = _get_price_data_from_alpha_vantage(ticker, period=period, interval=interval, max_retries=2)
     if not alpha.empty:
+        _save_price_cache(ticker, period, interval, alpha)
         return alpha
+
+    cached = _load_price_cache(ticker, period, interval)
+    if not cached.empty:
+        return cached
     return pd.DataFrame()
 
 

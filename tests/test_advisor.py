@@ -65,6 +65,18 @@ class AdvisorSignalTests(unittest.TestCase):
         self.assertEqual(analyses[0]["ticker"], "AAA")
         self.assertEqual(analyses[0]["decision"], "BUY")
 
+    def test_build_candidate_list_keeps_prefetched_empty_frames_for_top20(self):
+        empty_map = {ticker: pd.DataFrame() for ticker in advisor.TOP20}
+
+        with patch("src.advisor.get_sp500_universe", return_value=list(advisor.TOP20)), patch(
+            "src.advisor.get_bulk_price_data", return_value=empty_map
+        ):
+            candidates = advisor._build_candidate_list(universe_size=20, dip_scan_size=5)
+
+        self.assertEqual(len(candidates), len(advisor.TOP20))
+        self.assertTrue(all(candidates[t]["data"] is not None for t in advisor.TOP20))
+        self.assertTrue(all(candidates[t]["data"].empty for t in advisor.TOP20))
+
 
 if __name__ == "__main__":
     unittest.main()

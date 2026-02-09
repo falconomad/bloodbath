@@ -3,6 +3,7 @@ from src.analysis.sentiment import analyze_news_sentiment
 from src.analysis.technicals import calculate_technicals
 from src.analysis.events import score_events
 from src.analysis.dip import dip_bonus
+import pandas as pd
 
 
 def _as_float(value):
@@ -170,8 +171,9 @@ def _build_candidate_list(universe_size=120, dip_scan_size=60):
 
     for ticker in top20_set:
         if ticker not in final:
+            prefetched = price_map.get(ticker)
             final[ticker] = {
-                "data": None,
+                "data": prefetched if prefetched is not None else pd.DataFrame(),
                 "dip_score": 0.0,
                 "drawdown": None,
                 "stabilized": False,
