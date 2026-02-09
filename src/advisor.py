@@ -254,12 +254,31 @@ def run_top20_cycle_with_signals():
             }
         )
 
-    if analyses:
-        buys = sum(1 for a in analyses if a["decision"] == "BUY")
-        sells = sum(1 for a in analyses if a["decision"] == "SELL")
-        holds = sum(1 for a in analyses if a["decision"] == "HOLD")
-        print(f"[cycle] Signals => BUY:{buys} SELL:{sells} HOLD:{holds}")
-        top20_manager.step(analyses)
+    # Always mark-to-market current holdings, even if they were not in the current candidate slice.
+    held_tickers = set(top20_manager.holdings.keys())
+    analyzed_tickers = {a["ticker"] for a in analyses}
+    missing_held = sorted(held_tickers - analyzed_tickers)
+    for ticker in missing_held:
+        data = get_price_data(ticker, period="6mo", interval="1d")
+        if data.empty:
+            print(f"[cycle] {ticker}: mark-to-market skipped (data.empty=True)")
+            continue
+        price = _as_float(data["Close"].iloc[-1])
+        analyses.append(
+            {
+                "ticker": ticker,
+                "decision": "HOLD",
+                "score": 0.0,
+                "price": price,
+            }
+        )
+        print(f"[cycle] {ticker}: mark-to-market price={price:.2f}")
+
+    buys = sum(1 for a in analyses if a["decision"] == "BUY")
+    sells = sum(1 for a in analyses if a["decision"] == "SELL")
+    holds = sum(1 for a in analyses if a["decision"] == "HOLD")
+    print(f"[cycle] Signals => BUY:{buys} SELL:{sells} HOLD:{holds}")
+    top20_manager.step(analyses)
 
     positions = top20_manager.position_snapshot_df()
     return top20_manager.history_df(), top20_manager.transactions_df(), positions, analyses

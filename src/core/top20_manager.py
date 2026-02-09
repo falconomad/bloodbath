@@ -93,6 +93,9 @@ class Top20AutoManager:
                 total += float(position["shares"]) * price
         return round(float(total), 4)
 
+    def portfolio_value(self):
+        return self._portfolio_value()
+
     def position_snapshot_df(self, timestamp=None):
         if not self.holdings:
             return pd.DataFrame(
