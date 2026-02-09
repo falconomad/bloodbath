@@ -308,16 +308,27 @@ if db_ready:
             """,
             conn,
         )
+        signals = pd.read_sql(
+            """
+            SELECT *
+            FROM recommendation_signals
+            ORDER BY ABS(score - CASE WHEN score >= 0 THEN 1 ELSE -1 END) ASC, ABS(score) DESC
+            LIMIT 20
+            """,
+            conn,
+        )
     except Exception:
         portfolio = pd.DataFrame()
         transactions = pd.DataFrame()
         positions = pd.DataFrame()
+        signals = pd.DataFrame()
     finally:
         conn.close()
 else:
     portfolio = pd.DataFrame()
     transactions = pd.DataFrame()
     positions = pd.DataFrame()
+    signals = pd.DataFrame()
 
 skeleton_placeholder.empty()
 
@@ -372,6 +383,19 @@ if not portfolio.empty:
     st.plotly_chart(growth_fig, use_container_width=True)
 else:
     st.info("No portfolio data yet — worker has not run.")
+
+st.subheader("Top Signals (Closest to Trade Trigger)")
+if not signals.empty:
+    signal_view = signals.copy()
+    signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
+    signal_cols = [col for col in ["time", "ticker", "decision", "score", "price", "distance_to_trigger"] if col in signal_view.columns]
+    st.dataframe(
+        signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]),
+        use_container_width=True,
+        hide_index=True,
+    )
+else:
+    st.caption("No latest signal data yet.")
 
 st.subheader("Current Allocation")
 

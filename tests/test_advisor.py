@@ -36,5 +36,35 @@ class AdvisorCycleTests(unittest.TestCase):
         mock_step.assert_called_once()
 
 
+class AdvisorSignalTests(unittest.TestCase):
+    def test_run_top20_cycle_with_signals_returns_analyses(self):
+        data = pd.DataFrame({"Close": [100.0, 101.0, 102.5]})
+        candidates = {
+            "AAA": {
+                "data": data,
+                "dip_score": 0.2,
+                "drawdown": 0.25,
+                "stabilized": True,
+                "volatility_penalty": 0.0,
+            }
+        }
+
+        with patch("src.advisor._build_candidate_list", return_value=candidates), patch(
+            "src.advisor.get_company_news", return_value=[]
+        ), patch("src.advisor.generate_recommendation", return_value={"composite_score": 0.9}), patch.object(
+            advisor.top20_manager, "step"
+        ), patch.object(advisor.top20_manager, "history_df", return_value=pd.DataFrame()), patch.object(
+            advisor.top20_manager, "transactions_df", return_value=pd.DataFrame()
+        ), patch.object(advisor.top20_manager, "position_snapshot_df", return_value=pd.DataFrame()):
+            history, transactions, positions, analyses = advisor.run_top20_cycle_with_signals()
+
+        self.assertTrue(isinstance(history, pd.DataFrame))
+        self.assertTrue(isinstance(transactions, pd.DataFrame))
+        self.assertTrue(isinstance(positions, pd.DataFrame))
+        self.assertEqual(len(analyses), 1)
+        self.assertEqual(analyses[0]["ticker"], "AAA")
+        self.assertEqual(analyses[0]["decision"], "BUY")
+
+
 if __name__ == "__main__":
     unittest.main()
