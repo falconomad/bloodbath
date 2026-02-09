@@ -69,12 +69,17 @@ def run_walk_forward_backtest(
     price_map: Dict[str, pd.DataFrame],
     starting_capital: float = TOP20_STARTING_CAPITAL,
     warmup_bars: int = 60,
+    signal_buy_threshold: float = SIGNAL_BUY_THRESHOLD,
+    signal_sell_threshold: float = SIGNAL_SELL_THRESHOLD,
+    min_buy_score: float = TOP20_MIN_BUY_SCORE,
+    slippage_bps: float = TOP20_SLIPPAGE_BPS,
+    fee_bps: float = TOP20_FEE_BPS,
 ) -> BacktestResult:
     manager = Top20AutoManager(
         starting_capital=starting_capital,
-        min_buy_score=TOP20_MIN_BUY_SCORE,
-        slippage_bps=TOP20_SLIPPAGE_BPS,
-        fee_bps=TOP20_FEE_BPS,
+        min_buy_score=min_buy_score,
+        slippage_bps=slippage_bps,
+        fee_bps=fee_bps,
     )
 
     valid_map: Dict[str, pd.DataFrame] = {}
@@ -127,9 +132,9 @@ def run_walk_forward_backtest(
             composite_score = trend_score
             final_score = composite_score + dip_score + vol_penalty
 
-            if final_score >= SIGNAL_BUY_THRESHOLD:
+            if final_score >= signal_buy_threshold:
                 decision = "BUY"
-            elif final_score <= SIGNAL_SELL_THRESHOLD:
+            elif final_score <= signal_sell_threshold:
                 decision = "SELL"
             else:
                 decision = "HOLD"

@@ -26,3 +26,7 @@ Setup:
    - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
 7. `pip install -r requirements.txt`
 8. `streamlit run app.py`
+
+Backtesting:
+- Single run metrics: `python worker/backtest_runner.py`
+- Parameter sweep (ranked by excess return with drawdown constraint): `python worker/backtest_sweep_runner.py`

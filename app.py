@@ -345,11 +345,21 @@ if db_ready:
             """,
             conn,
         )
+        sweep_results = pd.read_sql(
+            """
+            SELECT *
+            FROM backtest_sweep_results
+            WHERE run_id = (SELECT run_id FROM backtest_sweep_results ORDER BY created_at DESC LIMIT 1)
+            ORDER BY rank ASC
+            """,
+            conn,
+        )
     except Exception:
         portfolio = pd.DataFrame()
         transactions = pd.DataFrame()
         positions = pd.DataFrame()
         signals = pd.DataFrame()
+        sweep_results = pd.DataFrame()
     finally:
         conn.close()
 else:
@@ -357,6 +367,7 @@ else:
     transactions = pd.DataFrame()
     positions = pd.DataFrame()
     signals = pd.DataFrame()
+    sweep_results = pd.DataFrame()
 
 skeleton_placeholder.empty()
 
@@ -545,3 +556,42 @@ with st.expander("Transaction History", expanded=False):
         st.dataframe(tx_style, use_container_width=True)
     else:
         st.write("No transactions yet.")
+
+st.subheader("Best Params (Latest Sweep)")
+if not sweep_results.empty:
+    cols = [
+        c
+        for c in [
+            "rank",
+            "buy_threshold",
+            "sell_threshold",
+            "min_buy_score",
+            "total_return_pct",
+            "benchmark_return_pct",
+            "excess_return_pct",
+            "max_drawdown_pct",
+            "sharpe_like",
+            "num_trades",
+            "created_at",
+        ]
+        if c in sweep_results.columns
+    ]
+    view = sweep_results[cols].copy()
+    st.dataframe(
+        view.style.format(
+            {
+                "buy_threshold": "{:.2f}",
+                "sell_threshold": "{:.2f}",
+                "min_buy_score": "{:.2f}",
+                "total_return_pct": "{:.2f}",
+                "benchmark_return_pct": "{:.2f}",
+                "excess_return_pct": "{:.2f}",
+                "max_drawdown_pct": "{:.2f}",
+                "sharpe_like": "{:.3f}",
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+else:
+    st.caption("No sweep results persisted yet. Run `python worker/backtest_sweep_runner.py`.")

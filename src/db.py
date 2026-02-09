@@ -83,6 +83,30 @@ def init_db():
     """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS backtest_sweep_results (
+            run_id TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            rank INTEGER,
+            buy_threshold REAL,
+            sell_threshold REAL,
+            min_buy_score REAL,
+            slippage_bps REAL,
+            fee_bps REAL,
+            ending_value REAL,
+            total_return_pct REAL,
+            benchmark_return_pct REAL,
+            excess_return_pct REAL,
+            max_drawdown_pct REAL,
+            volatility_pct REAL,
+            sharpe_like REAL,
+            turnover_ratio REAL,
+            num_trades INTEGER
+        );
+    """
+    )
+
 
     # Migration for fractional shares support.
     cur.execute("ALTER TABLE transactions ALTER COLUMN shares TYPE REAL USING shares::REAL;")
@@ -112,3 +136,46 @@ def claim_worker_run(run_key):
     cur.close()
     conn.close()
     return claimed
+
+
+def save_backtest_sweep_results(run_id, rows):
+    if not rows:
+        return
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM backtest_sweep_results WHERE run_id = %s", (run_id,))
+
+    for row in rows:
+        cur.execute(
+            """
+            INSERT INTO backtest_sweep_results (
+                run_id, rank, buy_threshold, sell_threshold, min_buy_score,
+                slippage_bps, fee_bps, ending_value, total_return_pct,
+                benchmark_return_pct, excess_return_pct, max_drawdown_pct,
+                volatility_pct, sharpe_like, turnover_ratio, num_trades
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                str(run_id),
+                int(row.get("rank", 0)),
+                float(row.get("buy_threshold", 0.0)),
+                float(row.get("sell_threshold", 0.0)),
+                float(row.get("min_buy_score", 0.0)),
+                float(row.get("slippage_bps", 0.0)),
+                float(row.get("fee_bps", 0.0)),
+                float(row.get("ending_value", 0.0)),
+                float(row.get("total_return_pct", 0.0)),
+                float(row.get("benchmark_return_pct", 0.0)),
+                float(row.get("excess_return_pct", 0.0)),
+                float(row.get("max_drawdown_pct", 0.0)),
+                float(row.get("volatility_pct", 0.0)),
+                float(row.get("sharpe_like", 0.0)),
+                float(row.get("turnover_ratio", 0.0)),
+                int(row.get("num_trades", 0)),
+            ),
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
