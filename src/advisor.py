@@ -75,6 +75,43 @@ def _atr_percent(data, period=14):
     return float(atr) / close
 
 
+def _news_quality_factor(headlines):
+    n = len(headlines or [])
+    if n >= 8:
+        return 1.0
+    if n >= 4:
+        return 0.7
+    if n >= 2:
+        return 0.45
+    return 0.2
+
+
+def _technical_quality_factor(data):
+    if data is None or data.empty or "Close" not in data:
+        return 0.0
+    close = data["Close"].dropna()
+    if len(close) >= 80:
+        return 1.0
+    if len(close) >= 50:
+        return 0.75
+    if len(close) >= 30:
+        return 0.45
+    return 0.2
+
+
+def _agreement_confidence(trend_score, sentiment, event_score):
+    signs = []
+    for v in [trend_score, sentiment, event_score]:
+        if abs(float(v)) < 0.1:
+            continue
+        signs.append(1 if float(v) > 0 else -1)
+
+    if len(signs) <= 1:
+        return 0.55
+    aligned = abs(sum(signs)) / len(signs)
+    return 0.55 + (0.45 * aligned)
+
+
 def generate_recommendation(ticker, price_data=None, news=None):
     data = price_data if price_data is not None else get_price_data(ticker)
     trend = calculate_technicals(data)
@@ -90,10 +127,15 @@ def generate_recommendation(ticker, price_data=None, news=None):
 
     trend_score = _trend_to_score(trend)
 
+    news_quality = _news_quality_factor(headlines)
+    tech_quality = _technical_quality_factor(data)
+    agreement_conf = _agreement_confidence(trend_score, sentiment, event_score)
+    signal_confidence = max(min((0.35 * news_quality) + (0.35 * tech_quality) + (0.30 * agreement_conf), 1.0), 0.0)
+
     # Adaptive blend: de-emphasize news when no useful headlines are available.
-    news_weight = 0.45 if headlines else 0.2
+    news_weight = (0.45 if headlines else 0.2) * news_quality
     event_weight = 0.25 if (headlines or has_upcoming_earnings) else 0.1
-    trend_weight = 1.0 - news_weight - event_weight
+    trend_weight = max(0.1, 1.0 - news_weight - event_weight)
 
     weighted_score = (trend_weight * trend_score) + (news_weight * sentiment) + (event_weight * event_score)
     score = _clamp(weighted_score * 2.0, -2.0, 2.0)
@@ -111,6 +153,9 @@ def generate_recommendation(ticker, price_data=None, news=None):
         "ticker": ticker,
         "trend": trend,
         "sentiment": sentiment,
+        "signal_confidence": round(signal_confidence, 4),
+        "news_quality": round(news_quality, 4),
+        "technical_quality": round(tech_quality, 4),
         "upcoming_earnings": has_upcoming_earnings,
         "event_detected": event_flag,
         "event_score": event_score,
@@ -284,13 +329,17 @@ def run_top20_cycle_with_signals():
         print(f"[cycle] {ticker}: headlines={len(headlines)}")
         rec = generate_recommendation(ticker, price_data=data, news=headlines)
         final_score = rec["composite_score"] + meta["dip_score"] + meta["volatility_penalty"]
+        signal_conf = float(rec.get("signal_confidence", 0.0))
 
         print(
             f"[cycle] {ticker}: composite={rec['composite_score']:.4f}, "
-            f"dip={meta['dip_score']:.4f}, vol_penalty={meta['volatility_penalty']:.4f}, final={final_score:.4f}"
+            f"dip={meta['dip_score']:.4f}, vol_penalty={meta['volatility_penalty']:.4f}, "
+            f"final={final_score:.4f}, conf={signal_conf:.3f}"
         )
 
-        if final_score >= SIGNAL_BUY_THRESHOLD:
+        if signal_conf < 0.45:
+            decision = "HOLD"
+        elif final_score >= SIGNAL_BUY_THRESHOLD:
             decision = "BUY"
         elif final_score <= SIGNAL_SELL_THRESHOLD:
             decision = "SELL"
@@ -306,6 +355,7 @@ def run_top20_cycle_with_signals():
                 "sentiment": float(rec.get("sentiment", 0.0)),
                 "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
                 "atr_pct": round(_atr_percent(data, period=14), 5),
+                "signal_confidence": round(signal_conf, 4),
             }
         )
 
@@ -328,6 +378,7 @@ def run_top20_cycle_with_signals():
                 "sentiment": 0.0,
                 "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
                 "atr_pct": round(_atr_percent(data, period=14), 5),
+                "signal_confidence": 0.5,
             }
         )
         print(f"[cycle] {ticker}: mark-to-market price={price:.2f}")
