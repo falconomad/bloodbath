@@ -123,8 +123,9 @@ def run_sp500_cycle(decision, data):
 
 from src.core.sp500_list import TOP20, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
+from src.settings import TOP20_STARTING_CAPITAL
 
-top20_manager = Top20AutoManager(starting_capital=2000)
+top20_manager = Top20AutoManager(starting_capital=TOP20_STARTING_CAPITAL)
 
 
 def _build_candidate_list(universe_size=120, dip_scan_size=60):

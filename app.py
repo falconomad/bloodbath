@@ -5,6 +5,7 @@ import base64
 from pathlib import Path
 
 from src.db import get_connection, init_db
+from src.settings import TOP20_STARTING_CAPITAL
 
 st.set_page_config(page_title="Bloodbath", page_icon="🩸", layout="wide")
 
@@ -363,8 +364,8 @@ with st.sidebar:
 
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
-    start = float(portfolio["value"].iloc[0])
-    change_pct = ((latest - start) / start) * 100 if start > 0 else 0.0
+    baseline_capital = float(TOP20_STARTING_CAPITAL)
+    change_pct = ((latest - baseline_capital) / baseline_capital) * 100 if baseline_capital > 0 else 0.0
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Current Portfolio Value", f"${latest:,.2f}")
