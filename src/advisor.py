@@ -150,6 +150,40 @@ _DECISION_STATE = {}
 _CYCLE_INDEX = 0
 
 
+def export_decision_state():
+    return {str(k): dict(v) for k, v in _DECISION_STATE.items()}
+
+
+def import_decision_state(state):
+    global _DECISION_STATE
+    if not isinstance(state, dict):
+        _DECISION_STATE = {}
+        return
+    parsed = {}
+    for ticker, payload in state.items():
+        if not isinstance(payload, dict):
+            continue
+        parsed[str(ticker)] = {
+            "decision": str(payload.get("decision", "HOLD")),
+            "cycle": int(payload.get("cycle", 0)),
+            "flip_cycle": int(payload.get("flip_cycle", 0)),
+            "last_non_hold_cycle": int(payload.get("last_non_hold_cycle", -10_000)),
+        }
+    _DECISION_STATE = parsed
+
+
+def get_cycle_index():
+    return int(_CYCLE_INDEX)
+
+
+def set_cycle_index(value):
+    global _CYCLE_INDEX
+    try:
+        _CYCLE_INDEX = int(value)
+    except Exception:
+        _CYCLE_INDEX = 0
+
+
 def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
     dip_meta = dip_meta or {}
     quality_cfg = SCORING_CONFIG.get("quality", {})

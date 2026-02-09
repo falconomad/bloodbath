@@ -10,7 +10,14 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.db import claim_worker_run, get_connection, init_db
-from src.advisor import run_top20_cycle_with_signals, top20_manager
+from src.advisor import (
+    export_decision_state,
+    get_cycle_index,
+    import_decision_state,
+    run_top20_cycle_with_signals,
+    set_cycle_index,
+    top20_manager,
+)
 from src.settings import TRADE_MODE
 
 DB_AVAILABLE = True
@@ -89,6 +96,34 @@ def save(history, transactions, positions, analyses):
                 ),
             )
 
+    decision_state = export_decision_state()
+    c.execute("DELETE FROM decision_memory")
+    for ticker, payload in decision_state.items():
+        c.execute(
+            """
+            INSERT INTO decision_memory (
+                ticker, last_decision, last_cycle, last_flip_cycle, last_non_hold_cycle, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, NOW())
+            """,
+            (
+                str(ticker),
+                str(payload.get("decision", "HOLD")),
+                int(payload.get("cycle", 0)),
+                int(payload.get("flip_cycle", 0)),
+                int(payload.get("last_non_hold_cycle", -10_000)),
+            ),
+        )
+
+    c.execute(
+        """
+        INSERT INTO decision_engine_meta (meta_key, meta_value, updated_at)
+        VALUES ('cycle_index', %s, NOW())
+        ON CONFLICT (meta_key)
+        DO UPDATE SET meta_value = EXCLUDED.meta_value, updated_at = NOW()
+        """,
+        (str(get_cycle_index()),),
+    )
+
     conn.commit()
     c.close()
     conn.close()
@@ -133,11 +168,41 @@ def restore_manager_state_from_db():
     )
     positions = c.fetchall() or []
 
+    c.execute(
+        """
+        SELECT ticker, last_decision, last_cycle, last_flip_cycle, last_non_hold_cycle
+        FROM decision_memory
+        """
+    )
+    decision_rows = c.fetchall() or []
+
+    c.execute("SELECT meta_value FROM decision_engine_meta WHERE meta_key = 'cycle_index' LIMIT 1")
+    cycle_row = c.fetchone()
+
     c.close()
     conn.close()
 
+    restored_decision_state = {}
+    for ticker, last_decision, last_cycle, last_flip_cycle, last_non_hold_cycle in decision_rows:
+        restored_decision_state[str(ticker)] = {
+            "decision": str(last_decision or "HOLD"),
+            "cycle": int(last_cycle or 0),
+            "flip_cycle": int(last_flip_cycle or 0),
+            "last_non_hold_cycle": int(last_non_hold_cycle if last_non_hold_cycle is not None else -10_000),
+        }
+    import_decision_state(restored_decision_state)
+    if cycle_row and cycle_row[0] is not None:
+        set_cycle_index(int(cycle_row[0]))
+    elif restored_decision_state:
+        set_cycle_index(max(int(v.get("cycle", 0)) for v in restored_decision_state.values()))
+    else:
+        set_cycle_index(0)
+
     if latest_portfolio_value is None or not positions:
-        print("[worker][restore] no prior portfolio state found; using default manager state")
+        print(
+            "[worker][restore] no prior portfolio state found; using default manager state "
+            f"(decision_state={len(restored_decision_state)} cycle_index={get_cycle_index()})"
+        )
         return
 
     holdings = {}
@@ -164,7 +229,8 @@ def restore_manager_state_from_db():
 
     print(
         f"[worker][restore] restored holdings={len(holdings)} "
-        f"cash={restored_cash:.2f} portfolio_value={latest_portfolio_value:.2f}"
+        f"cash={restored_cash:.2f} portfolio_value={latest_portfolio_value:.2f} "
+        f"decision_state={len(restored_decision_state)} cycle_index={get_cycle_index()}"
     )
 
 

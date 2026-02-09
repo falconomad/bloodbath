@@ -83,6 +83,29 @@ def init_db():
     """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS decision_memory (
+            ticker TEXT PRIMARY KEY,
+            last_decision TEXT,
+            last_cycle INTEGER,
+            last_flip_cycle INTEGER,
+            last_non_hold_cycle INTEGER,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS decision_engine_meta (
+            meta_key TEXT PRIMARY KEY,
+            meta_value TEXT,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    """
+    )
+
 
     # Migration for fractional shares support.
     cur.execute("ALTER TABLE transactions ALTER COLUMN shares TYPE REAL USING shares::REAL;")
