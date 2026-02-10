@@ -35,10 +35,6 @@ def _as_float(value):
     return float(value)
 
 
-def _clamp(value, min_v, max_v):
-    return max(min(value, max_v), min_v)
-
-
 def _trend_to_score(trend):
     if trend == "BULLISH":
         return 1.0
@@ -125,19 +121,6 @@ def _technical_quality_factor(data):
     if len(close) >= 30:
         return 0.45
     return 0.2
-
-
-def _agreement_confidence(trend_score, sentiment, event_score):
-    signs = []
-    for v in [trend_score, sentiment, event_score]:
-        if abs(float(v)) < 0.1:
-            continue
-        signs.append(1 if float(v) > 0 else -1)
-
-    if len(signs) <= 1:
-        return 0.55
-    aligned = abs(sum(signs)) / len(signs)
-    return 0.55 + (0.45 * aligned)
 
 
 SCORING_CONFIG = load_config()

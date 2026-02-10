@@ -4,8 +4,9 @@ import argparse
 import json
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+from src.common.trace_utils import load_jsonl_dict_rows, safe_float
 
 
 @dataclass
@@ -17,31 +18,8 @@ class TradeOutcome:
     duration_steps: int
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return float(default)
-
-
 def load_trace_entries(trace_path: str) -> list[dict[str, Any]]:
-    path = Path(trace_path)
-    if not path.exists():
-        return []
-
-    out: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(row, dict):
-                out.append(row)
-    return out
+    return load_jsonl_dict_rows(trace_path)
 
 
 def build_trade_outcomes(entries: list[dict[str, Any]], horizon: int = 1) -> list[TradeOutcome]:
@@ -64,8 +42,8 @@ def build_trade_outcomes(entries: list[dict[str, Any]], horizon: int = 1) -> lis
             if decision not in {"BUY", "SELL"}:
                 continue
 
-            p0 = _safe_float(row.get("price", None), default=float("nan"))
-            p1 = _safe_float(rows[j].get("price", None), default=float("nan"))
+            p0 = safe_float(row.get("price", None), default=float("nan"))
+            p1 = safe_float(rows[j].get("price", None), default=float("nan"))
             if not (math.isfinite(p0) and math.isfinite(p1)) or p0 <= 0 or p1 <= 0:
                 continue
 
@@ -141,8 +119,8 @@ def module_contribution_report(entries: list[dict[str, Any]], horizon: int = 1) 
             j = i + h
             if j >= len(rows):
                 continue
-            p0 = _safe_float(row.get("price", None), default=float("nan"))
-            p1 = _safe_float(rows[j].get("price", None), default=float("nan"))
+            p0 = safe_float(row.get("price", None), default=float("nan"))
+            p1 = safe_float(rows[j].get("price", None), default=float("nan"))
             if not (math.isfinite(p0) and math.isfinite(p1)) or p0 <= 0 or p1 <= 0:
                 continue
             fwd = (p1 - p0) / p0
@@ -155,7 +133,7 @@ def module_contribution_report(entries: list[dict[str, Any]], horizon: int = 1) 
             for name, payload in signals.items():
                 if not isinstance(payload, dict):
                     continue
-                value = _safe_float(payload.get("value", 0.0))
+                value = safe_float(payload.get("value", 0.0))
                 signal_hist.setdefault(str(name), []).append(value)
 
     out: dict[str, float] = {}

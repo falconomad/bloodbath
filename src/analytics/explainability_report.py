@@ -1,30 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections import Counter, defaultdict
-from pathlib import Path
 from typing import Any
+
+import json
+
+from src.common.trace_utils import load_jsonl_dict_rows
 
 
 def load_trace_entries(trace_path: str) -> list[dict[str, Any]]:
-    path = Path(trace_path)
-    if not path.exists():
-        return []
-
-    rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(row, dict):
-                rows.append(row)
-    return rows
+    return load_jsonl_dict_rows(trace_path)
 
 
 def _top_signal_contributors(signals: dict[str, Any], weights: dict[str, Any], limit: int = 3) -> list[dict[str, float]]:

@@ -6,9 +6,9 @@ import json
 import math
 import random
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+from src.common.trace_utils import load_jsonl_dict_rows, safe_float
 from src.pipeline.decision_engine import Signal, aggregate_confidence, decide, load_config, normalize_signals, weighted_score
 
 
@@ -30,32 +30,8 @@ class ExecutionModel:
     fill_ratio: float = 1.0
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return float(default)
-
-
 def load_trace_entries(trace_path: str) -> list[dict[str, Any]]:
-    path = Path(trace_path)
-    if not path.exists():
-        return []
-
-    rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            rows.append(payload)
-    return rows
+    return load_jsonl_dict_rows(trace_path)
 
 
 def _signals_from_payload(raw_signals: dict[str, Any]) -> dict[str, Signal]:
@@ -65,8 +41,8 @@ def _signals_from_payload(raw_signals: dict[str, Any]) -> dict[str, Signal]:
             continue
         parsed[str(name)] = Signal(
             name=str(name),
-            value=_safe_float(payload.get("value", 0.0)),
-            confidence=_safe_float(payload.get("confidence", 0.0)),
+            value=safe_float(payload.get("value", 0.0)),
+            confidence=safe_float(payload.get("confidence", 0.0)),
             quality_ok=bool(payload.get("quality_ok", False)),
             reason=str(payload.get("reason", "")),
         )
@@ -79,7 +55,7 @@ def build_examples(entries: list[dict[str, Any]], horizon: int = 1) -> list[Back
         ticker = str(row.get("ticker", "")).upper().strip()
         if not ticker:
             continue
-        price = _safe_float(row.get("price", None), default=float("nan"))
+        price = safe_float(row.get("price", None), default=float("nan"))
         if not math.isfinite(price) or price <= 0:
             continue
         by_ticker.setdefault(ticker, []).append(row)
@@ -91,8 +67,8 @@ def build_examples(entries: list[dict[str, Any]], horizon: int = 1) -> list[Back
             next_idx = idx + max(int(horizon), 1)
             if next_idx >= len(rows):
                 continue
-            next_price = _safe_float(rows[next_idx].get("price", 0.0))
-            curr_price = _safe_float(row.get("price", 0.0))
+            next_price = safe_float(rows[next_idx].get("price", 0.0))
+            curr_price = safe_float(row.get("price", 0.0))
             if curr_price <= 0 or next_price <= 0:
                 continue
             forward_return = (next_price - curr_price) / curr_price
@@ -115,7 +91,7 @@ def build_examples(entries: list[dict[str, Any]], horizon: int = 1) -> list[Back
 
 
 def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
-    positive = {k: max(_safe_float(v), 0.0) for k, v in weights.items()}
+    positive = {k: max(safe_float(v), 0.0) for k, v in weights.items()}
     total = sum(positive.values())
     if total <= 0:
         n = max(len(positive), 1)
@@ -131,7 +107,7 @@ def sample_weight_candidates(base_weights: dict[str, float], trials: int, seed: 
         perturbed = {}
         for k in keys:
             scale = rng.uniform(0.5, 1.5)
-            perturbed[k] = max(0.0001, _safe_float(base_weights.get(k, 0.0)) * scale)
+            perturbed[k] = max(0.0001, safe_float(base_weights.get(k, 0.0)) * scale)
         candidates.append(_normalize_weights(perturbed))
     return candidates
 
