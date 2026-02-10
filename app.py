@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import json
+from pathlib import Path
 
 from src.db import get_connection, init_db
 from src.settings import TOP20_STARTING_CAPITAL
