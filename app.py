@@ -572,18 +572,44 @@ if not portfolio.empty:
         else:
             st.info("No allocation snapshot available yet.")
     with g2:
-        dd_df = portfolio[["time"]].copy()
-        dd_df["drawdown_pct"] = drawdown_series.fillna(0) * 100
-        dd_fig = px.area(
-            dd_df,
-            x="time",
-            y="drawdown_pct",
-            title="Drawdown %",
-            template=plot_template,
-        )
-        dd_fig.update_traces(line_color=down_color, fillcolor="rgba(217,48,37,0.18)")
-        dd_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
-        st.plotly_chart(dd_fig, use_container_width=True)
+        if not positions.empty and {"ticker", "pnl_pct"}.issubset(set(positions.columns)):
+            pnl_view_top = positions.copy()
+            pnl_view_top["pnl_pct_display"] = pnl_view_top["pnl_pct"] * 100
+            max_abs_pnl = float(pnl_view_top["pnl_pct_display"].abs().max()) if not pnl_view_top.empty else 0.0
+            pnl_view_top["bar_color"] = pnl_view_top["pnl_pct_display"].apply(lambda v: _signed_bar_hex(v, max_abs_pnl))
+            pnl_fig_top = px.bar(
+                pnl_view_top.sort_values("pnl_pct_display", ascending=False),
+                x="ticker",
+                y="pnl_pct_display",
+                color="ticker",
+                title="Position P/L %",
+                template=plot_template,
+                color_discrete_map={row["ticker"]: row["bar_color"] for _, row in pnl_view_top.iterrows()},
+            )
+            pnl_fig_top.update_traces(
+                marker_line_width=0,
+                hovertemplate="<b>%{x}</b><br>P/L: %{y:.2f}%<extra></extra>",
+            )
+            pnl_fig_top.update_layout(
+                height=340,
+                coloraxis_showscale=False,
+                margin=dict(l=10, r=10, t=50, b=10),
+                paper_bgcolor=card,
+                plot_bgcolor=card,
+                bargap=0.35,
+                xaxis=dict(title="", showgrid=False, tickfont=dict(size=12)),
+                yaxis=dict(
+                    title="",
+                    ticksuffix="%",
+                    gridcolor=border,
+                    zeroline=True,
+                    zerolinecolor=text,
+                    zerolinewidth=1.5,
+                ),
+            )
+            st.plotly_chart(pnl_fig_top, use_container_width=True)
+        else:
+            st.info("No position P/L snapshot available yet.")
 else:
     st.info("No portfolio data yet — worker has not run.")
 
