@@ -493,7 +493,7 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
     st.subheader("At-a-Glance")
-    auto_refresh = st.toggle("Auto-refresh", value=True, help="Poll database periodically for new worker updates.")
+    auto_refresh = st.toggle("Auto-refresh", value=False, help="Poll database periodically for new worker updates.")
     refresh_seconds = st.slider("Refresh every (seconds)", min_value=5, max_value=300, value=10, step=5)
     if auto_refresh:
         if st_autorefresh is not None:
