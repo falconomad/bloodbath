@@ -116,7 +116,7 @@ st.markdown(
         left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
         top: 54%;
         width: 3.8rem;
-        height: 3.8rem;
+        height: 2.8rem;
         transform: translateY(-50%);
         border-radius: 0.5rem;
         background-image: url('{logo_uri}');
