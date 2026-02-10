@@ -6,6 +6,7 @@ from src.pipeline.decision_engine import (
     decide,
     hard_guardrails,
     normalize_signals,
+    resolve_effective_weights,
     veto_decision,
     volatility_adjustment,
     weighted_score,
@@ -35,6 +36,13 @@ class DecisionEngineTests(unittest.TestCase):
                 "require_micro_for_buy": True,
                 "conflict_penalty": 0.2,
                 "max_confidence_drop_on_conflict": 0.75,
+                "max_portfolio_drawdown_for_new_risk": 0.18,
+                "max_sector_concentration": 0.45,
+                "max_avg_correlation": 0.85,
+            },
+            "weights": {"trend": 0.35, "sentiment": 0.25, "events": 0.15, "micro": 0.10, "dip": 0.10, "volatility": 0.05},
+            "regimes": {
+                "bull": {"trend": 0.40, "sentiment": 0.24, "events": 0.12, "micro": 0.12, "dip": 0.08, "volatility": 0.04}
             },
             "quality": {"min_usable_signals": 3},
             "stability": {
@@ -147,6 +155,37 @@ class DecisionEngineTests(unittest.TestCase):
         self.assertIn("guardrail:data_gaps", reasons)
         self.assertIn("guardrail:low_volume", reasons)
         self.assertIn("guardrail:micro_unavailable", reasons)
+
+    def test_portfolio_guardrails_fire_when_limits_breached(self):
+        cfg = self._cfg()
+        signals = {
+            "trend": Signal("trend", 0.8, 0.8, True),
+            "sentiment": Signal("sentiment", 0.4, 0.7, True),
+            "events": Signal("events", 0.3, 0.6, True),
+        }
+        reasons = hard_guardrails(
+            signals,
+            {
+                "rel_volume": 1.1,
+                "data_quality_ok": True,
+                "data_gap_ratio": 0.0,
+                "micro_available": True,
+                "portfolio_drawdown": 0.25,
+                "ticker_sector_allocation": 0.52,
+                "portfolio_avg_correlation": 0.9,
+            },
+            cfg,
+        )
+        self.assertIn("guardrail:portfolio_drawdown", reasons)
+        self.assertIn("guardrail:sector_concentration", reasons)
+        self.assertIn("guardrail:high_correlation", reasons)
+
+    def test_resolve_effective_weights_uses_regime_override(self):
+        cfg = self._cfg()
+        weights, regime = resolve_effective_weights(cfg, {"market_regime": "bull"})
+        self.assertEqual(regime, "bull")
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=6)
+        self.assertGreater(weights["trend"], 0.35)
 
     def test_stability_non_hold_cooldown(self):
         cfg = self._cfg()

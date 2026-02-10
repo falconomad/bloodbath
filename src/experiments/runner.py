@@ -122,6 +122,10 @@ def run_experiment(
                     "test_total_return": test_metrics.get("total_return", 0.0),
                     "test_win_rate": test_metrics.get("win_rate", 0.0),
                     "test_trades": test_metrics.get("trades", 0.0),
+                    "test_sharpe_ratio": test_metrics.get("sharpe_ratio", 0.0),
+                    "test_sortino_ratio": test_metrics.get("sortino_ratio", 0.0),
+                    "test_max_drawdown": test_metrics.get("max_drawdown", 0.0),
+                    "test_expectancy_per_trade": test_metrics.get("expectancy_per_trade", 0.0),
                 }
             )
 
@@ -133,9 +137,13 @@ def run_experiment(
                 "split": "aggregate",
                 "train_objective": mean_train,
                 "test_objective": mean_test,
-                "test_total_return": 0.0,
-                "test_win_rate": 0.0,
-                "test_trades": 0.0,
+                "test_total_return": (sum(r["test_total_return"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_win_rate": (sum(r["test_win_rate"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_trades": (sum(r["test_trades"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_sharpe_ratio": (sum(r["test_sharpe_ratio"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_sortino_ratio": (sum(r["test_sortino_ratio"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_max_drawdown": (sum(r["test_max_drawdown"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_expectancy_per_trade": (sum(r["test_expectancy_per_trade"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
             }
         )
 
@@ -168,6 +176,10 @@ def run_experiment(
                 "test_total_return",
                 "test_win_rate",
                 "test_trades",
+                "test_sharpe_ratio",
+                "test_sortino_ratio",
+                "test_max_drawdown",
+                "test_expectancy_per_trade",
             ],
         )
         writer.writeheader()

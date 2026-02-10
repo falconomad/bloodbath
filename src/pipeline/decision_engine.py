@@ -76,6 +76,17 @@ def _fallback_config() -> dict[str, Any]:
             "require_micro_for_buy": True,
             "max_position_size": 0.20,
             "min_position_size": 0.02,
+            "max_portfolio_drawdown_for_new_risk": 0.18,
+            "max_sector_concentration": 0.45,
+            "max_avg_correlation": 0.85,
+            "portfolio_risk_confidence_penalty_max": 0.30,
+            "portfolio_risk_position_scale_min": 0.40,
+        },
+        "regimes": {
+            "bull": {"trend": 0.40, "sentiment": 0.24, "events": 0.12, "micro": 0.12, "dip": 0.08, "volatility": 0.04},
+            "bear": {"trend": 0.32, "sentiment": 0.20, "events": 0.16, "micro": 0.10, "dip": 0.14, "volatility": 0.08},
+            "volatile": {"trend": 0.30, "sentiment": 0.20, "events": 0.14, "micro": 0.08, "dip": 0.10, "volatility": 0.18},
+            "sideways": {"trend": 0.30, "sentiment": 0.26, "events": 0.16, "micro": 0.12, "dip": 0.10, "volatility": 0.06},
         },
         "stability": {
             "min_decision_hold_cycles": 2,
@@ -114,6 +125,25 @@ def normalize_signals(signals: dict[str, Signal]) -> dict[str, Signal]:
         signal.value = clamp(signal.value, -1.0, 1.0)
         signal.confidence = clamp(signal.confidence, 0.0, 1.0)
     return signals
+
+
+def normalize_weights(weights: dict[str, float]) -> dict[str, float]:
+    positive = {str(k): max(float(v), 0.0) for k, v in (weights or {}).items()}
+    total = sum(positive.values())
+    if total <= 0:
+        n = max(len(positive), 1)
+        return {k: 1.0 / n for k in positive} if positive else {}
+    return {k: v / total for k, v in positive.items()}
+
+
+def resolve_effective_weights(cfg: dict[str, Any], risk_context: dict[str, Any]) -> tuple[dict[str, float], str]:
+    base = normalize_weights(cfg.get("weights", {}) or {})
+    regime = str((risk_context or {}).get("market_regime", "default")).lower().strip()
+    overrides = cfg.get("regimes", {}) or {}
+    regime_weights = overrides.get(regime)
+    if isinstance(regime_weights, dict) and regime_weights:
+        return normalize_weights(regime_weights), regime
+    return base, "default"
 
 
 def weighted_score(signals: dict[str, Signal], weights: dict[str, float]) -> float:
@@ -211,6 +241,21 @@ def hard_guardrails(
     if require_micro_for_buy and not bool(risk_context.get("micro_available", False)):
         reasons.append("guardrail:micro_unavailable")
 
+    max_drawdown = float(risk.get("max_portfolio_drawdown_for_new_risk", 0.18))
+    portfolio_drawdown = float(risk_context.get("portfolio_drawdown", 0.0))
+    if portfolio_drawdown > max_drawdown:
+        reasons.append("guardrail:portfolio_drawdown")
+
+    max_sector = float(risk.get("max_sector_concentration", 0.45))
+    sector_alloc = float(risk_context.get("ticker_sector_allocation", 0.0))
+    if sector_alloc > max_sector:
+        reasons.append("guardrail:sector_concentration")
+
+    max_corr = float(risk.get("max_avg_correlation", 0.85))
+    avg_corr = float(risk_context.get("portfolio_avg_correlation", 0.0))
+    if avg_corr > max_corr:
+        reasons.append("guardrail:high_correlation")
+
     return reasons
 
 
@@ -283,6 +328,29 @@ def volatility_adjustment(risk_context: dict[str, Any], cfg: dict[str, Any]) -> 
     conf_mult = 1.0 - (conf_penalty_max * t)
     pos_mult = 1.0 - ((1.0 - pos_scale_min) * t)
     return clamp(conf_mult, 0.0, 1.0), clamp(pos_mult, 0.0, 1.0), "medium"
+
+
+def portfolio_risk_adjustment(risk_context: dict[str, Any], cfg: dict[str, Any]) -> tuple[float, float, str]:
+    risk_cfg = cfg.get("risk", {})
+    drawdown = clamp(float(risk_context.get("portfolio_drawdown", 0.0)), 0.0, 1.0)
+    sector_alloc = clamp(float(risk_context.get("ticker_sector_allocation", 0.0)), 0.0, 1.0)
+    corr = clamp(float(risk_context.get("portfolio_avg_correlation", 0.0)), 0.0, 1.0)
+
+    dd_cap = max(float(risk_cfg.get("max_portfolio_drawdown_for_new_risk", 0.18)), 1e-6)
+    sec_cap = max(float(risk_cfg.get("max_sector_concentration", 0.45)), 1e-6)
+    corr_cap = max(float(risk_cfg.get("max_avg_correlation", 0.85)), 1e-6)
+
+    # Composite portfolio stress where >1 means above configured risk budgets.
+    stress = max(drawdown / dd_cap, sector_alloc / sec_cap, corr / corr_cap)
+    stress = clamp((stress - 1.0), 0.0, 1.0)
+    if stress <= 0:
+        return 1.0, 1.0, "normal"
+
+    conf_penalty_max = clamp(float(risk_cfg.get("portfolio_risk_confidence_penalty_max", 0.30)), 0.0, 0.95)
+    pos_scale_min = clamp(float(risk_cfg.get("portfolio_risk_position_scale_min", 0.40)), 0.0, 1.0)
+    conf_mult = 1.0 - (conf_penalty_max * stress)
+    pos_mult = 1.0 - ((1.0 - pos_scale_min) * stress)
+    return clamp(conf_mult, 0.0, 1.0), clamp(pos_mult, 0.0, 1.0), "stressed"
 
 
 def position_size(score: float, confidence: float, cfg: dict[str, Any], position_scale: float = 1.0) -> float:
@@ -370,8 +438,10 @@ def decide(
     local_conflict = conflict_ratio(signals)
 
     conf_mult, pos_mult, vol_regime = volatility_adjustment(risk_context, cfg)
-    adjusted_confidence = clamp(confidence * conf_mult, 0.0, 1.0)
+    p_conf_mult, p_pos_mult, portfolio_regime = portfolio_risk_adjustment(risk_context, cfg)
+    adjusted_confidence = clamp(confidence * conf_mult * p_conf_mult, 0.0, 1.0)
     reasons.append(f"volatility:{vol_regime}")
+    reasons.append(f"portfolio_risk:{portfolio_regime}")
 
     if adjusted_confidence < force_hold_conf:
         reasons.append("confidence:force_hold")
@@ -410,7 +480,7 @@ def decide(
     if stability_reason:
         reasons.append(stability_reason)
 
-    size = 0.0 if decision != "BUY" else position_size(score, adjusted_confidence, cfg, position_scale=pos_mult)
+    size = 0.0 if decision != "BUY" else position_size(score, adjusted_confidence, cfg, position_scale=(pos_mult * p_pos_mult))
     return decision, reasons, size
 
 

@@ -14,6 +14,7 @@ from src.pipeline.decision_engine import (
     clamp,
     decide,
     normalize_signals,
+    resolve_effective_weights,
     weighted_score,
     write_trace,
 )
@@ -97,8 +98,45 @@ def atr_percent(data, period=14):
     return float(atr) / close
 
 
-def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg):
+def _detect_market_regime(trend_score: float, atr_pct_value: float, drawdown: float | None) -> str:
+    dd = float(drawdown or 0.0)
+    if atr_pct_value >= 0.07:
+        return "volatile"
+    if trend_score >= 0.25 and dd < 0.12:
+        return "bull"
+    if trend_score <= -0.25 or dd >= 0.18:
+        return "bear"
+    return "sideways"
+
+
+def _sentiment_confidence(details: dict[str, Any], sentiment_ok: bool, cfg: dict[str, Any]) -> float:
+    if not sentiment_ok:
+        return 0.0
+    score = abs(float(details.get("score", 0.0)))
+    article_count = int(details.get("article_count", 0))
+    variance = clamp(float(details.get("variance", 0.0)), 0.0, 1.0)
+    mixed = bool(details.get("mixed_opinions", False))
+    source_diversity = clamp(float(details.get("source_diversity", 0.0)), 0.0, 1.0)
+    eff_n = max(float(details.get("effective_sample_size", 0.0)), 0.0)
+    reliability = clamp(float(details.get("source_reliability_mean", 0.7)), 0.0, 1.0)
+
+    quality_cfg = cfg.get("quality", {})
+    min_articles = max(int(quality_cfg.get("min_sentiment_articles", 4)), 1)
+    article_factor = clamp(article_count / float(min_articles * 2), 0.35, 1.0)
+    diversity_factor = clamp(0.65 + (0.35 * source_diversity), 0.4, 1.0)
+    sample_factor = clamp((eff_n / float(min_articles * 2)) if min_articles > 0 else 1.0, 0.35, 1.0)
+    reliability_factor = clamp(0.6 + (0.4 * reliability), 0.4, 1.0)
+    disagreement_penalty = clamp(0.15 + (0.55 * variance), 0.15, 0.85)
+    if mixed:
+        disagreement_penalty = clamp(disagreement_penalty + 0.15, 0.15, 0.95)
+
+    base = clamp(0.30 + (0.70 * score), 0.0, 1.0)
+    return clamp(base * article_factor * diversity_factor * sample_factor * reliability_factor * (1.0 - disagreement_penalty), 0.0, 1.0)
+
+
+def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio_context=None):
     dip_meta = dip_meta or {}
+    portfolio_context = portfolio_context or {}
     quality_cfg = cfg.get("quality", {})
     risk_cfg = cfg.get("risk", {})
 
@@ -123,7 +161,15 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg):
     sentiment_details = (
         analyze_news_sentiment_details(headlines)
         if headlines
-        else {"score": 0.0, "variance": 0.0, "article_count": 0, "mixed_opinions": False}
+        else {
+            "score": 0.0,
+            "variance": 0.0,
+            "article_count": 0,
+            "mixed_opinions": False,
+            "source_diversity": 0.0,
+            "effective_sample_size": 0.0,
+            "source_reliability_mean": 0.0,
+        }
     )
     sentiment = float(sentiment_details.get("score", 0.0))
     min_sentiment_articles = int(quality_cfg.get("min_sentiment_articles", 4))
@@ -133,7 +179,7 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg):
     sentiment_signal = Signal(
         name="sentiment",
         value=sentiment,
-        confidence=((0.35 + 0.65 * max(abs(sentiment), 0.0)) * (0.75 if mixed_opinions else 1.0)) if sentiment_ok else 0.0,
+        confidence=_sentiment_confidence(sentiment_details, sentiment_ok, cfg),
         quality_ok=sentiment_ok,
         reason="" if sentiment_ok else sentiment_reason,
     )
@@ -186,6 +232,8 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg):
         reason="" if dip_meta.get("drawdown") is not None else "no_volatility_context",
     )
 
+    atr_pct_value = atr_percent(data, period=14)
+    market_regime = _detect_market_regime(trend_score, atr_pct_value, dip_meta.get("drawdown"))
     signals = normalize_signals(
         {
             "trend": trend_signal,
@@ -201,12 +249,16 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg):
         "micro_available": micro_available,
         "data_quality_ok": price_ok,
         "data_gap_ratio": data_gap_ratio,
-        "atr_pct": atr_percent(data, period=14),
+        "atr_pct": atr_pct_value,
         "article_count": len(headlines),
         "sentiment_article_count": sentiment_article_count,
         "event_article_count": event_article_count,
         "sentiment_variance": sentiment_variance,
         "sentiment_mixed": mixed_opinions,
+        "market_regime": market_regime,
+        "portfolio_drawdown": float(portfolio_context.get("portfolio_drawdown", 0.0)),
+        "portfolio_avg_correlation": float(portfolio_context.get("portfolio_avg_correlation", 0.0)),
+        "ticker_sector_allocation": float(portfolio_context.get("ticker_sector_allocation", 0.0)),
     }
 
 
@@ -219,13 +271,14 @@ def generate_recommendation_core(
     apply_stability_gate: bool,
     cfg: dict[str, Any],
     decision_state: dict[str, dict[str, Any]],
+    portfolio_context: dict[str, Any] | None = None,
 ):
     headlines = safe_news(headlines)
     price = float(data["Close"].iloc[-1]) if data is not None and not data.empty and "Close" in data else 0.0
     trend, has_upcoming_earnings, signals, risk_context = _normalized_module_signals(
-        ticker=ticker, data=data, headlines=headlines, dip_meta=dip_meta, cfg=cfg
+        ticker=ticker, data=data, headlines=headlines, dip_meta=dip_meta, cfg=cfg, portfolio_context=portfolio_context
     )
-    weights = cfg.get("weights", {})
+    weights, active_regime = resolve_effective_weights(cfg, risk_context)
     score = weighted_score(signals, weights)
     signal_confidence, conflicts = aggregate_confidence(
         signals,
@@ -258,6 +311,7 @@ def generate_recommendation_core(
             "decision": decision,
             "decision_reasons": decision_reasons,
             "weights": weights,
+            "active_regime": active_regime,
             "signals": {k: s.as_dict() for k, s in signals.items()},
             "conflict_ratio": round(conflicts, 6),
             "risk_context": risk_context,
@@ -275,6 +329,8 @@ def generate_recommendation_core(
         "upcoming_earnings": has_upcoming_earnings,
         "event_detected": event_flag,
         "event_score": event_score,
+        "market_regime": risk_context.get("market_regime", "default"),
+        "active_regime": active_regime,
         "composite_score": round(score, 4),
         "decision": decision,
         "confidence": round(confidence, 2),

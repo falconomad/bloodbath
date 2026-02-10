@@ -76,7 +76,15 @@ def set_cycle_index(value):
         _CYCLE_INDEX = 0
 
 
-def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, cycle_idx=0, apply_stability_gate=False):
+def generate_recommendation(
+    ticker,
+    price_data=None,
+    news=None,
+    dip_meta=None,
+    cycle_idx=0,
+    apply_stability_gate=False,
+    portfolio_context=None,
+):
     data = price_data if price_data is not None else get_price_data(ticker)
     headlines = news if news is not None else get_company_news(ticker, structured=True)
     return generate_recommendation_core(
@@ -88,6 +96,7 @@ def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, c
         apply_stability_gate=apply_stability_gate,
         cfg=SCORING_CONFIG,
         decision_state=_DECISION_STATE,
+        portfolio_context=portfolio_context,
     )
 
 
@@ -234,6 +243,61 @@ def _build_candidate_list(universe_size=120, dip_scan_size=60):
     return final
 
 
+def _portfolio_risk_context_for_ticker(ticker, analyses_so_far, candidates):
+    current_value = float(top20_manager.portfolio_value())
+    history = [float(v) for v in top20_manager.history] + [current_value]
+    rolling_peak = max(history) if history else max(current_value, 1.0)
+    portfolio_drawdown = max((rolling_peak - current_value) / rolling_peak, 0.0) if rolling_peak > 0 else 0.0
+
+    sector_mv = {}
+    total_mv = max(current_value, 1e-9)
+    for held_ticker, position in top20_manager.holdings.items():
+        price = float(top20_manager.last_price_by_ticker.get(held_ticker, position.get("avg_cost", 0.0)))
+        shares = float(position.get("shares", 0.0))
+        mv = max(shares * max(price, 0.0), 0.0)
+        sector = str(position.get("sector", TOP20_SECTOR.get(held_ticker, "UNKNOWN")))
+        sector_mv[sector] = sector_mv.get(sector, 0.0) + mv
+
+    # Include currently proposed buys in running sector exposure estimate.
+    for rec in analyses_so_far:
+        if str(rec.get("decision", "")).upper() != "BUY":
+            continue
+        sec = str(rec.get("sector", TOP20_SECTOR.get(rec.get("ticker", ""), "UNKNOWN")))
+        alloc_hint = float(rec.get("position_size", 0.0))
+        sector_mv[sec] = sector_mv.get(sec, 0.0) + (alloc_hint * current_value)
+
+    ticker_sector = TOP20_SECTOR.get(ticker, "UNKNOWN")
+    ticker_sector_allocation = float(sector_mv.get(ticker_sector, 0.0)) / total_mv if total_mv > 0 else 0.0
+
+    held_or_candidate = list({*top20_manager.holdings.keys(), ticker})
+    returns = {}
+    for sym in held_or_candidate:
+        data = (candidates.get(sym) or {}).get("data")
+        if data is None or data.empty or "Close" not in data:
+            continue
+        close = data["Close"].dropna()
+        if len(close) < 25:
+            continue
+        returns[sym] = close.pct_change().dropna().tail(40)
+    corr_values = []
+    if len(returns) >= 2:
+        aligned = pd.DataFrame(returns).dropna(how="any")
+        if aligned.shape[0] >= 10:
+            corr = aligned.corr().abs()
+            for i, c1 in enumerate(corr.columns):
+                for c2 in corr.columns[i + 1 :]:
+                    val = float(corr.loc[c1, c2])
+                    if pd.notna(val):
+                        corr_values.append(val)
+    portfolio_avg_correlation = float(sum(corr_values) / len(corr_values)) if corr_values else 0.0
+
+    return {
+        "portfolio_drawdown": round(portfolio_drawdown, 6),
+        "portfolio_avg_correlation": round(portfolio_avg_correlation, 6),
+        "ticker_sector_allocation": round(ticker_sector_allocation, 6),
+    }
+
+
 def run_top20_cycle_with_signals():
     global _CYCLE_INDEX
     _CYCLE_INDEX += 1
@@ -257,6 +321,7 @@ def run_top20_cycle_with_signals():
             dip_meta=meta,
             cycle_idx=_CYCLE_INDEX,
             apply_stability_gate=True,
+            portfolio_context=_portfolio_risk_context_for_ticker(ticker, analyses, candidates),
         )
         final_score = float(rec["composite_score"])
         signal_conf = float(rec.get("signal_confidence", 0.0))

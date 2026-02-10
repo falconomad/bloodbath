@@ -34,6 +34,41 @@ risk:
   require_micro_for_buy: true
   max_position_size: 0.20
   min_position_size: 0.02
+  max_portfolio_drawdown_for_new_risk: 0.18
+  max_sector_concentration: 0.45
+  max_avg_correlation: 0.85
+  portfolio_risk_confidence_penalty_max: 0.30
+  portfolio_risk_position_scale_min: 0.40
+
+regimes:
+  bull:
+    trend: 0.40
+    sentiment: 0.24
+    events: 0.12
+    micro: 0.12
+    dip: 0.08
+    volatility: 0.04
+  bear:
+    trend: 0.32
+    sentiment: 0.20
+    events: 0.16
+    micro: 0.10
+    dip: 0.14
+    volatility: 0.08
+  volatile:
+    trend: 0.30
+    sentiment: 0.20
+    events: 0.14
+    micro: 0.08
+    dip: 0.10
+    volatility: 0.18
+  sideways:
+    trend: 0.30
+    sentiment: 0.26
+    events: 0.16
+    micro: 0.12
+    dip: 0.10
+    volatility: 0.06
 
 stability:
   min_decision_hold_cycles: 2

@@ -83,6 +83,10 @@ class SimpleBacktesterTests(unittest.TestCase):
         self.assertIn("best_weights", result)
         self.assertIn("best_metrics", result)
         self.assertIn("execution_cost_rate", result["best_metrics"])
+        self.assertIn("sharpe_ratio", result["best_metrics"])
+        self.assertIn("sortino_ratio", result["best_metrics"])
+        self.assertIn("max_drawdown", result["best_metrics"])
+        self.assertIn("expectancy_per_trade", result["best_metrics"])
 
         path.unlink(missing_ok=True)
 

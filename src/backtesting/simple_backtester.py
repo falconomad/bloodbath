@@ -9,7 +9,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.common.trace_utils import load_jsonl_dict_rows, safe_float
-from src.pipeline.decision_engine import Signal, aggregate_confidence, decide, load_config, normalize_signals, weighted_score
+from src.pipeline.decision_engine import (
+    Signal,
+    aggregate_confidence,
+    decide,
+    load_config,
+    normalize_signals,
+    resolve_effective_weights,
+    weighted_score,
+)
 
 
 @dataclass
@@ -137,6 +145,21 @@ def _executed_trade_return(decision: str, forward_return: float, model: Executio
     return gross - costs
 
 
+def _max_drawdown_from_pnl(pnl: list[float]) -> float:
+    if not pnl:
+        return 0.0
+    equity = 1.0
+    peak = 1.0
+    max_dd = 0.0
+    for r in pnl:
+        equity *= (1.0 + float(r))
+        if equity > peak:
+            peak = equity
+        if peak > 0:
+            max_dd = max(max_dd, (peak - equity) / peak)
+    return max_dd
+
+
 def evaluate_candidate(
     examples: list[BacktestExample],
     cfg: dict[str, Any],
@@ -149,16 +172,18 @@ def evaluate_candidate(
     model = execution_model or ExecutionModel()
 
     pnl: list[float] = []
+    trade_pnl: list[float] = []
     trades = 0
     wins = 0
     state: dict[str, dict[str, Any]] = {}
 
     for i, ex in enumerate(examples, start=1):
-        score = weighted_score(ex.signals, local_cfg.get("weights", {}))
+        effective_weights, _active_regime = resolve_effective_weights(local_cfg, ex.risk_context)
+        score = weighted_score(ex.signals, effective_weights)
         conf, _ = aggregate_confidence(
             ex.signals,
             local_cfg.get("risk", {}).get("conflict_penalty", 0.2),
-            weights=local_cfg.get("weights", {}),
+            weights=effective_weights,
             max_conflict_drop=local_cfg.get("risk", {}).get("max_confidence_drop_on_conflict", 0.75),
         )
         decision, _reasons, size = decide(
@@ -175,6 +200,7 @@ def evaluate_candidate(
         trade_ret = _executed_trade_return(decision, ex.forward_return, model, size)
         if decision in {"BUY", "SELL"}:
             trades += 1
+            trade_pnl.append(trade_ret)
 
         if decision in {"BUY", "SELL"} and trade_ret > 0:
             wins += 1
@@ -188,6 +214,10 @@ def evaluate_candidate(
             "avg_trade_return": 0.0,
             "total_return": 0.0,
             "objective": -1e9,
+            "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "expectancy_per_trade": 0.0,
         }
 
     total_return = sum(pnl)
@@ -195,13 +225,28 @@ def evaluate_candidate(
     variance = sum((x - avg) ** 2 for x in pnl) / len(pnl)
     std = math.sqrt(max(variance, 0.0))
     objective = (avg / std) if std > 1e-9 else (avg if avg > 0 else -1e6)
+    downside = [x for x in pnl if x < 0]
+    downside_std = math.sqrt(sum(x * x for x in downside) / len(downside)) if downside else 0.0
+    sharpe = (avg / std) if std > 1e-9 else 0.0
+    sortino = (avg / downside_std) if downside_std > 1e-9 else 0.0
+    max_drawdown = _max_drawdown_from_pnl(pnl)
+    wins_list = [x for x in trade_pnl if x > 0]
+    losses_list = [x for x in trade_pnl if x < 0]
+    avg_win = (sum(wins_list) / len(wins_list)) if wins_list else 0.0
+    avg_loss = (sum(losses_list) / len(losses_list)) if losses_list else 0.0
+    win_rate = (wins / trades) if trades > 0 else 0.0
+    expectancy = (win_rate * avg_win) + ((1.0 - win_rate) * avg_loss)
 
     return {
         "trades": float(trades),
-        "win_rate": (wins / trades) if trades > 0 else 0.0,
+        "win_rate": win_rate,
         "avg_trade_return": (sum(pnl) / trades) if trades > 0 else 0.0,
         "total_return": total_return,
         "objective": objective,
+        "sharpe_ratio": sharpe,
+        "sortino_ratio": sortino,
+        "max_drawdown": max_drawdown,
+        "expectancy_per_trade": expectancy,
         "execution_cost_rate": _cost_rate(model),
         "fill_ratio": float(model.fill_ratio),
     }

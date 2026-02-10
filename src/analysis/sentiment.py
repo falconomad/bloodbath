@@ -189,7 +189,15 @@ def _clip_outliers(scores):
 def analyze_news_sentiment_details(news_list):
     items = _normalize_news_items(news_list)
     if not items:
-        return {"score": 0.0, "variance": 0.0, "article_count": 0, "mixed_opinions": False}
+        return {
+            "score": 0.0,
+            "variance": 0.0,
+            "article_count": 0,
+            "mixed_opinions": False,
+            "source_diversity": 0.0,
+            "effective_sample_size": 0.0,
+            "source_reliability_mean": 0.0,
+        }
 
     headlines = [it["headline"] for it in items]
 
@@ -204,8 +212,11 @@ def analyze_news_sentiment_details(news_list):
 
     clipped = _clip_outliers(raw_scores)
     weights = []
+    source_weights = []
     for item in items:
-        weights.append(_recency_weight(item["published_at"]) * _source_weight(item["source"]))
+        sw = _source_weight(item["source"])
+        source_weights.append(sw)
+        weights.append(_recency_weight(item["published_at"]) * sw)
 
     total_w = sum(weights)
     if total_w <= 0:
@@ -221,11 +232,21 @@ def analyze_news_sentiment_details(news_list):
     if mixed:
         weighted *= 0.7
 
+    unique_sources = {str(item.get("source", "")).strip().lower() or "unknown" for item in items}
+    source_diversity = len(unique_sources) / max(len(items), 1)
+    sum_w = sum(weights)
+    sum_sq_w = sum(w * w for w in weights)
+    effective_n = (sum_w * sum_w / sum_sq_w) if sum_sq_w > 1e-12 else 0.0
+    source_reliability_mean = (sum(source_weights) / len(source_weights)) if source_weights else 0.0
+
     return {
         "score": round(max(min(weighted, 1.0), -1.0), 4),
         "variance": round(max(variance, 0.0), 6),
         "article_count": len(items),
         "mixed_opinions": mixed,
+        "source_diversity": round(max(min(source_diversity, 1.0), 0.0), 6),
+        "effective_sample_size": round(max(effective_n, 0.0), 6),
+        "source_reliability_mean": round(max(min(source_reliability_mean, 1.0), 0.0), 6),
     }
 
 
