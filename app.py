@@ -2,10 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import base64
+import json
 from pathlib import Path
 
 from src.db import get_connection, init_db
 from src.settings import TOP20_STARTING_CAPITAL
+from src.common.trace_utils import load_jsonl_dict_rows
+from src.analytics.performance_reports import generate_performance_report
+from src.analytics.explainability_report import generate_explainability_report
 
 st.set_page_config(page_title="Bloodbath", page_icon="🩸", layout="wide")
 
@@ -350,6 +354,19 @@ def _signed_bar_hex(v, max_abs):
     return "#A14A4A" if strength < 0.35 else ("#7A3434" if strength < 0.7 else "#4D1F1F")
 
 
+def _load_latest_experiment_result():
+    root = Path("artifacts/experiments")
+    if not root.exists():
+        return None
+    json_files = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not json_files:
+        return None
+    try:
+        return json.loads(json_files[0].read_text(encoding="utf-8")), json_files[0]
+    except Exception:
+        return None
+
+
 skeleton_placeholder = st.empty()
 with skeleton_placeholder.container():
     show_dashboard_skeleton()
@@ -621,3 +638,98 @@ with st.expander("Transaction History", expanded=False):
         st.dataframe(tx_style, use_container_width=True)
     else:
         st.write("No transactions yet.")
+
+# New Engine Insights
+trace_rows = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
+if trace_rows:
+    perf_report = generate_performance_report(trace_rows, horizon=1)
+    explain_report = generate_explainability_report(trace_rows, max_examples=20)
+
+    st.subheader("Decision Quality")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Trace Entries", f"{int(explain_report.get('total_entries', 0))}")
+    d2.metric("Signal Accuracy", f"{100 * float(perf_report.get('signal_accuracy', 0.0)):.2f}%")
+    d3.metric("Profit Factor", f"{float(perf_report.get('profit_factor', 0.0)):.2f}" if perf_report.get("profit_factor") != float("inf") else "∞")
+    d4.metric("Max Drawdown", f"{100 * float(perf_report.get('max_drawdown', 0.0)):.2f}%")
+
+    reason_rows = explain_report.get("top_reasons", []) or []
+    if reason_rows:
+        reason_df = pd.DataFrame(reason_rows, columns=["reason", "count"])
+        reason_fig = px.bar(
+            reason_df.head(12),
+            x="reason",
+            y="count",
+            title="Top Decision Reasons",
+            template=plot_template,
+        )
+        reason_fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
+        st.plotly_chart(reason_fig, use_container_width=True)
+
+    st.subheader("Explainability")
+    ex_rows = explain_report.get("examples", []) or []
+    if ex_rows:
+        explainer_table = pd.DataFrame(
+            [
+                {
+                    "ts": r.get("ts"),
+                    "ticker": r.get("ticker"),
+                    "decision": r.get("decision"),
+                    "score": r.get("score"),
+                    "confidence": r.get("confidence"),
+                    "reasons": ", ".join(r.get("reasons", [])),
+                    "top_contributors": ", ".join(
+                        f"{c.get('signal')}:{float(c.get('contribution', 0.0)):.3f}" for c in (r.get("top_contributors", []) or [])
+                    ),
+                }
+                for r in ex_rows
+            ]
+        )
+        ex_style = explainer_table.style.format({"score": "{:.3f}", "confidence": "{:.3f}"})
+        if "decision" in explainer_table.columns:
+            ex_style = ex_style.map(_color_decision, subset=["decision"])
+        if "score" in explainer_table.columns:
+            ex_style = ex_style.map(_color_signed, subset=["score"])
+        st.dataframe(ex_style, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No explainability examples available.")
+
+    st.subheader("Module Contributions")
+    contrib = perf_report.get("module_contributions", {}) or {}
+    if contrib:
+        contrib_df = pd.DataFrame(
+            [{"module": k, "corr": float(v)} for k, v in contrib.items()]
+        ).sort_values("corr", ascending=False)
+        contrib_fig = px.bar(
+            contrib_df,
+            x="module",
+            y="corr",
+            title="Signal vs Forward Return Correlation",
+            template=plot_template,
+            color="corr",
+            color_continuous_scale="RdYlGn",
+        )
+        contrib_fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
+        st.plotly_chart(contrib_fig, use_container_width=True)
+    else:
+        st.caption("No module contribution data available.")
+else:
+    st.info("No recommendation trace data found yet (`logs/recommendation_trace.jsonl`).")
+
+st.subheader("Experiments")
+exp = _load_latest_experiment_result()
+if exp:
+    exp_payload, exp_path = exp
+    st.caption(f"Latest experiment: {exp_path}")
+    best_variant = exp_payload.get("best_variant")
+    if best_variant:
+        e1, e2, e3 = st.columns(3)
+        e1.metric("Best Variant", str(best_variant.get("variant", "-")))
+        e2.metric("Test Objective", f"{float(best_variant.get('test_objective', 0.0)):.4f}")
+        e3.metric("Train Objective", f"{float(best_variant.get('train_objective', 0.0)):.4f}")
+
+    rows = exp_payload.get("rows", []) or []
+    if rows:
+        exp_df = pd.DataFrame(rows)
+        st.dataframe(exp_df, use_container_width=True, hide_index=True)
+else:
+    st.caption("No experiment artifacts found in `artifacts/experiments/`.")
