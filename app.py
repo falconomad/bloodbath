@@ -136,9 +136,46 @@ st.markdown(
         position: absolute;
         left: 62px;
       }}
+      @media (min-width: 961px) {{
+        [data-testid="stHeader"] {{
+          display: none !important;
+        }}
+        .block-container {{
+          padding-top: 1.4rem !important;
+        }}
+      }}
       @media (max-width: 960px) {{
         .kb-sidebar-brand {{
           display: none;
+        }}
+        [data-testid="stHeader"] {{
+          display: block !important;
+        }}
+        [data-testid="stHeader"]::before {{
+          content: "";
+          position: absolute;
+          left: 0.8rem;
+          top: 50%;
+          width: 2.15rem;
+          height: 2.15rem;
+          transform: translateY(-50%);
+          border-radius: 0.4rem;
+          background-image: url('{logo_uri}');
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+        }}
+        [data-testid="stHeader"]::after {{
+          content: "kaibot";
+          position: absolute;
+          left: 3.35rem;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 1.25rem;
+          font-weight: 700;
+          letter-spacing: -0.01em;
+          color: {text};
+          line-height: 1;
         }}
       }}
       [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{
