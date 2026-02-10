@@ -625,7 +625,7 @@ if db_ready:
 
     try:
         portfolio = pd.read_sql("SELECT * FROM portfolio ORDER BY time", conn)
-        transactions = pd.read_sql("SELECT * FROM transactions ORDER BY time", conn)
+        transactions = pd.read_sql("SELECT * FROM transactions ORDER BY time DESC", conn)
         positions = pd.read_sql(
             """
             SELECT *
@@ -956,6 +956,9 @@ else:
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
         tx = _with_logo_column(transactions.copy())
+        if "time" in tx.columns:
+            tx["time"] = tx["time"].astype(str)
+            tx = tx.sort_values("time", ascending=False)
         if "action" in tx.columns:
             tx["action"] = tx["action"].astype(str).str.upper()
         if "value" not in tx.columns and {"shares", "price"}.issubset(tx.columns):
