@@ -204,8 +204,8 @@ st.markdown(
         border-radius: 16px;
       }}
       [data-testid="stDataFrame"] img {{
-        width: 18px !important;
-        height: 18px !important;
+        width: 14px !important;
+        height: 14px !important;
         object-fit: contain;
       }}
       div[data-testid="stExpander"] details summary p {{
