@@ -1,0 +1,38 @@
+{
+  "horizon": 1,
+  "walk_forward": {
+    "enabled": true,
+    "windows": 2,
+    "train_ratio": 0.5
+  },
+  "execution": {
+    "fee_bps": 1.0,
+    "spread_bps": 5.0,
+    "slippage_bps": 3.0,
+    "fill_ratio": 0.9
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "weights": {
+        "trend": 0.35,
+        "sentiment": 0.25,
+        "events": 0.15,
+        "micro": 0.1,
+        "dip": 0.1,
+        "volatility": 0.05
+      }
+    },
+    {
+      "name": "trend_heavy",
+      "weights": {
+        "trend": 0.55,
+        "sentiment": 0.2,
+        "events": 0.1,
+        "micro": 0.05,
+        "dip": 0.05,
+        "volatility": 0.05
+      }
+    }
+  ]
+}
