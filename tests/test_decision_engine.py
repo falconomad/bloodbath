@@ -260,6 +260,27 @@ class DecisionEngineTests(unittest.TestCase):
         self.assertLess(high[0], low[0])
         self.assertLess(high[1], low[1])
 
+    def test_growth_edge_gate_forces_hold(self):
+        cfg = self._cfg()
+        cfg["growth"] = {"enabled": True, "min_growth_edge_for_trade": 0.5}
+        signals = {
+            "trend": Signal("trend", 0.6, 0.9, True),
+            "sentiment": Signal("sentiment", 0.4, 0.8, True),
+            "events": Signal("events", 0.3, 0.7, True),
+        }
+        decision, reasons, _ = decide(
+            ticker="AAA",
+            score=0.46,
+            confidence=0.8,
+            signals=signals,
+            risk_context={"rel_volume": 1.1, "data_quality_ok": True, "data_gap_ratio": 0.0, "micro_available": True},
+            state={},
+            cycle_idx=1,
+            cfg=cfg,
+        )
+        self.assertEqual(decision, "HOLD")
+        self.assertIn("growth:edge_below_min", reasons)
+
     def test_high_volatility_reduces_buy_position_size(self):
         cfg = self._cfg()
         signals = {

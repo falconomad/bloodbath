@@ -101,6 +101,15 @@ def _fallback_config() -> dict[str, Any]:
             "min_quality_signals_for_trade": 3,
             "min_confidence_for_trade": 0.45,
         },
+        "growth": {
+            "enabled": True,
+            "min_growth_edge_for_trade": 0.22,
+            "objective_total_return_weight": 1.0,
+            "objective_expectancy_weight": 0.6,
+            "objective_drawdown_penalty": 0.9,
+            "objective_turnover_penalty": 0.15,
+            "objective_risk_adjusted_weight": 0.2,
+        },
     }
 
 
@@ -453,13 +462,24 @@ def decide(
 
     if adjusted_confidence < min_conf and decision != "HOLD":
         reasons.append("confidence:below_min")
+        decision = "HOLD"
 
     sentiment_value = float(signals.get("sentiment", Signal("sentiment", 0.0, 0.0, False)).value)
     if decision == "BUY" and sentiment_value <= float(risk.get("extreme_negative_sentiment", -0.7)):
         reasons.append("risk:extreme_negative_sentiment")
+        decision = "HOLD"
 
     if local_conflict >= conflict_hold_t:
         reasons.append("conflict:high_disagreement")
+        decision = "HOLD"
+
+    growth_cfg = cfg.get("growth", {})
+    if bool(growth_cfg.get("enabled", True)) and decision in {"BUY", "SELL"}:
+        growth_edge = abs(float(score)) * adjusted_confidence
+        min_growth_edge = clamp(float(growth_cfg.get("min_growth_edge_for_trade", 0.22)), 0.0, 1.0)
+        if growth_edge < min_growth_edge:
+            reasons.append("growth:edge_below_min")
+            decision = "HOLD"
 
     if guardrail_reasons:
         reasons.extend(guardrail_reasons)

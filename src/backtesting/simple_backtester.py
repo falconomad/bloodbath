@@ -214,10 +214,12 @@ def evaluate_candidate(
             "avg_trade_return": 0.0,
             "total_return": 0.0,
             "objective": -1e9,
+            "risk_adjusted_objective": -1e9,
             "sharpe_ratio": 0.0,
             "sortino_ratio": 0.0,
             "max_drawdown": 0.0,
             "expectancy_per_trade": 0.0,
+            "turnover": 0.0,
         }
 
     total_return = sum(pnl)
@@ -236,17 +238,33 @@ def evaluate_candidate(
     avg_loss = (sum(losses_list) / len(losses_list)) if losses_list else 0.0
     win_rate = (wins / trades) if trades > 0 else 0.0
     expectancy = (win_rate * avg_win) + ((1.0 - win_rate) * avg_loss)
+    growth_cfg = local_cfg.get("growth", {}) or {}
+    ret_w = float(growth_cfg.get("objective_total_return_weight", 1.0))
+    exp_w = float(growth_cfg.get("objective_expectancy_weight", 0.6))
+    dd_p = float(growth_cfg.get("objective_drawdown_penalty", 0.9))
+    turnover_p = float(growth_cfg.get("objective_turnover_penalty", 0.15))
+    risk_adj_w = float(growth_cfg.get("objective_risk_adjusted_weight", 0.2))
+    turnover = (trades / len(examples)) if examples else 0.0
+    growth_objective = (
+        (ret_w * total_return)
+        + (exp_w * expectancy)
+        + (risk_adj_w * objective)
+        - (dd_p * max_drawdown)
+        - (turnover_p * turnover)
+    )
 
     return {
         "trades": float(trades),
         "win_rate": win_rate,
         "avg_trade_return": (sum(pnl) / trades) if trades > 0 else 0.0,
         "total_return": total_return,
-        "objective": objective,
+        "objective": growth_objective,
+        "risk_adjusted_objective": objective,
         "sharpe_ratio": sharpe,
         "sortino_ratio": sortino,
         "max_drawdown": max_drawdown,
         "expectancy_per_trade": expectancy,
+        "turnover": turnover,
         "execution_cost_rate": _cost_rate(model),
         "fill_ratio": float(model.fill_ratio),
     }
