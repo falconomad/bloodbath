@@ -19,6 +19,12 @@ from src.pipeline.decision_engine import (
     weighted_score,
     write_trace,
 )
+from src.validation.data_validation import (
+    validate_earnings_payload,
+    validate_micro_features,
+    validate_news_headlines,
+    validate_price_history,
+)
 import pandas as pd
 from datetime import datetime, timezone
 
@@ -115,23 +121,6 @@ def _technical_quality_factor(data):
     return 0.2
 
 
-def _price_data_quality_ok(data, min_points=40, max_missing_ratio=0.05):
-    if data is None or data.empty or "Close" not in data:
-        return False
-    close = data["Close"]
-    if len(close) < int(min_points):
-        return False
-    missing_ratio = float(close.isna().mean())
-    return missing_ratio <= float(max_missing_ratio)
-
-
-def _price_data_gap_ratio(data):
-    if data is None or data.empty or "Close" not in data:
-        return 1.0
-    close = data["Close"]
-    return float(close.isna().mean())
-
-
 def _agreement_confidence(trend_score, sentiment, event_score):
     signs = []
     for v in [trend_score, sentiment, event_score]:
@@ -192,61 +181,61 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
     trend = calculate_technicals(data)
     trend_score = _trend_to_score(trend)
     tech_quality = _technical_quality_factor(data)
-    price_ok = _price_data_quality_ok(
+    price_validation = validate_price_history(
         data,
         min_points=quality_cfg.get("min_price_points", 40),
         max_missing_ratio=quality_cfg.get("max_missing_ratio", 0.05),
     )
-    data_gap_ratio = _price_data_gap_ratio(data)
+    price_ok = price_validation.valid
+    data_gap_ratio = price_validation.missing_ratio
     trend_signal = Signal(
         name="trend",
         value=trend_score,
         confidence=(0.2 + (0.8 * tech_quality)) if price_ok else 0.0,
         quality_ok=price_ok,
-        reason="" if price_ok else "insufficient_price_history_or_gaps",
+        reason="" if price_ok else price_validation.reason,
     )
 
     sentiment = float(analyze_news_sentiment(headlines)) if headlines else 0.0
     min_sentiment_articles = int(quality_cfg.get("min_sentiment_articles", 4))
-    sentiment_ok = len(headlines) >= min_sentiment_articles
+    sentiment_ok, sentiment_reason, sentiment_article_count = validate_news_headlines(headlines, min_sentiment_articles)
     sentiment_variance = min(abs(sentiment), 1.0)
     sentiment_signal = Signal(
         name="sentiment",
         value=sentiment,
         confidence=(0.35 + 0.65 * sentiment_variance) if sentiment_ok else 0.0,
         quality_ok=sentiment_ok,
-        reason="" if sentiment_ok else "too_few_articles",
+        reason="" if sentiment_ok else sentiment_reason,
     )
 
     earnings = get_earnings_calendar(ticker)
-    try:
-        has_upcoming_earnings = len(earnings) > 0
-    except Exception:
-        has_upcoming_earnings = False
+    earnings_ok, earnings_count = validate_earnings_payload(earnings)
+    has_upcoming_earnings = earnings_ok and earnings_count > 0
     event_score = float(score_events(headlines, has_upcoming_earnings=has_upcoming_earnings))
     min_news_articles = int(quality_cfg.get("min_news_articles", 3))
-    events_ok = (len(headlines) >= min_news_articles) or has_upcoming_earnings
+    events_ok, events_reason, event_article_count = validate_news_headlines(headlines, min_news_articles)
+    events_ok = events_ok or has_upcoming_earnings
     event_signal = Signal(
         name="events",
         value=event_score,
         confidence=0.6 if events_ok else 0.0,
         quality_ok=events_ok,
-        reason="" if events_ok else "insufficient_event_context",
+        reason="" if events_ok else (events_reason or "insufficient_event_context"),
     )
 
     micro = get_alpaca_snapshot_features(ticker)
-    micro_available = isinstance(micro, dict) and bool(micro.get("available", False))
-    rel_volume = float(micro.get("rel_volume", 1.0)) if micro_available else 1.0
-    intraday_return = float(micro.get("intraday_return", 0.0)) if micro_available else 0.0
-    micro_quality = float(micro.get("quality", 0.0)) if micro_available else 0.0
+    micro_ok, micro_reason, micro_features = validate_micro_features(micro)
+    micro_available = micro_ok
+    rel_volume = float(micro_features.get("rel_volume", 1.0))
+    intraday_return = float(micro_features.get("intraday_return", 0.0))
+    micro_quality = float(micro_features.get("quality", 0.0))
     micro_signal_value = clamp((0.6 * intraday_return) + (0.4 * (rel_volume - 1.0)), -1.0, 1.0)
-    micro_ok = micro_available and micro_quality > 0.0
     micro_signal = Signal(
         name="micro",
         value=micro_signal_value,
         confidence=micro_quality if micro_ok else 0.0,
         quality_ok=micro_ok,
-        reason="" if micro_ok else "micro_data_unavailable",
+        reason="" if micro_ok else micro_reason,
     )
 
     dip_score = float(dip_meta.get("dip_score", 0.0))
@@ -284,6 +273,8 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
         "data_gap_ratio": data_gap_ratio,
         "atr_pct": _atr_percent(data, period=14),
         "article_count": len(headlines),
+        "sentiment_article_count": sentiment_article_count,
+        "event_article_count": event_article_count,
     }
 
 
