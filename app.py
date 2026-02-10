@@ -578,6 +578,32 @@ if not portfolio.empty:
                 legend=dict(orientation="v", y=0.95),
             )
             st.plotly_chart(alloc_top_fig, use_container_width=True)
+
+            alloc_table = _with_logo_column(alloc_view_top.copy())
+            alloc_table["allocation_pct"] = (
+                (alloc_table["market_value"] / alloc_table["market_value"].sum()) * 100
+                if alloc_table["market_value"].sum() > 0
+                else 0.0
+            )
+            if "pnl_pct" in alloc_table.columns:
+                alloc_table["pnl_pct_display"] = alloc_table["pnl_pct"] * 100
+            cols = [c for c in ["logo", "ticker", "market_value", "allocation_pct", "pnl", "pnl_pct_display"] if c in alloc_table.columns]
+            alloc_style = alloc_table[cols].style.format(
+                {"market_value": "${:,.2f}", "allocation_pct": "{:.2f}%", "pnl": "${:,.2f}", "pnl_pct_display": "{:.2f}%"}
+            )
+            if "pnl" in cols:
+                alloc_style = alloc_style.map(_color_signed, subset=["pnl"])
+            if "pnl_pct_display" in cols:
+                alloc_style = alloc_style.map(_color_signed, subset=["pnl_pct_display"])
+            try:
+                st.dataframe(
+                    alloc_style,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
+                )
+            except Exception:
+                st.dataframe(alloc_style, use_container_width=True, hide_index=True)
         else:
             st.info("No allocation snapshot available yet.")
     with g2:
