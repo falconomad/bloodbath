@@ -36,4 +36,5 @@ def get_logo_url(ticker: str) -> str:
     if not domain:
         compact = symbol.replace("-", "").replace(".", "")
         domain = f"{compact.lower()}.com"
-    return f"https://logo.clearbit.com/{domain}"
+    # Use Google's favicon endpoint for higher reliability in hosted Streamlit environments.
+    return f"https://www.google.com/s2/favicons?domain={domain}&sz=64"

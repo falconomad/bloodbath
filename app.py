@@ -588,22 +588,24 @@ if not portfolio.empty:
             if "pnl_pct" in alloc_table.columns:
                 alloc_table["pnl_pct_display"] = alloc_table["pnl_pct"] * 100
             cols = [c for c in ["logo", "ticker", "market_value", "allocation_pct", "pnl", "pnl_pct_display"] if c in alloc_table.columns]
-            alloc_style = alloc_table[cols].style.format(
-                {"market_value": "${:,.2f}", "allocation_pct": "{:.2f}%", "pnl": "${:,.2f}", "pnl_pct_display": "{:.2f}%"}
-            )
-            if "pnl" in cols:
-                alloc_style = alloc_style.map(_color_signed, subset=["pnl"])
-            if "pnl_pct_display" in cols:
-                alloc_style = alloc_style.map(_color_signed, subset=["pnl_pct_display"])
+            alloc_display = alloc_table[cols].copy()
+            if "market_value" in alloc_display.columns:
+                alloc_display["market_value"] = alloc_display["market_value"].map(lambda v: f"${float(v):,.2f}")
+            if "allocation_pct" in alloc_display.columns:
+                alloc_display["allocation_pct"] = alloc_display["allocation_pct"].map(lambda v: f"{float(v):.2f}%")
+            if "pnl" in alloc_display.columns:
+                alloc_display["pnl"] = alloc_display["pnl"].map(lambda v: f"${float(v):,.2f}")
+            if "pnl_pct_display" in alloc_display.columns:
+                alloc_display["pnl_pct_display"] = alloc_display["pnl_pct_display"].map(lambda v: f"{float(v):.2f}%")
             try:
                 st.dataframe(
-                    alloc_style,
+                    alloc_display,
                     use_container_width=True,
                     hide_index=True,
                     column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
                 )
             except Exception:
-                st.dataframe(alloc_style, use_container_width=True, hide_index=True)
+                st.dataframe(alloc_display, use_container_width=True, hide_index=True)
         else:
             st.info("No allocation snapshot available yet.")
     with g2:
@@ -659,13 +661,13 @@ if not signals.empty:
     signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]).head(20)
     s1, s2 = st.columns([2, 1])
     with s1:
-        signal_display = signal_table.style.format(
-            {"score": "{:.3f}", "price": "{:.2f}", "distance_to_trigger": "{:.3f}"}
-        )
-        if "score" in signal_cols:
-            signal_display = signal_display.map(_color_signed, subset=["score"])
-        if "decision" in signal_cols:
-            signal_display = signal_display.map(_color_decision, subset=["decision"])
+        signal_display = signal_table.copy()
+        if "score" in signal_display.columns:
+            signal_display["score"] = signal_display["score"].map(lambda v: f"{float(v):.3f}")
+        if "price" in signal_display.columns:
+            signal_display["price"] = signal_display["price"].map(lambda v: f"{float(v):.2f}")
+        if "distance_to_trigger" in signal_display.columns:
+            signal_display["distance_to_trigger"] = signal_display["distance_to_trigger"].map(lambda v: f"{float(v):.3f}")
         try:
             st.dataframe(
                 signal_display,
@@ -698,18 +700,20 @@ with st.expander("Transaction History", expanded=False):
         if "value" not in tx.columns and {"shares", "price"}.issubset(tx.columns):
             tx["value"] = tx["shares"] * tx["price"]
 
-        tx_style = tx.style.format({"shares": "{:.4f}", "price": "{:.2f}", "value": "{:.2f}"})
-        if "action" in tx.columns:
-            tx_style = tx_style.map(_color_decision, subset=["action"])
-        if "value" in tx.columns:
-            tx_style = tx_style.map(_color_signed, subset=["value"])
+        tx_display = tx.copy()
+        if "shares" in tx_display.columns:
+            tx_display["shares"] = tx_display["shares"].map(lambda v: f"{float(v):.4f}")
+        if "price" in tx_display.columns:
+            tx_display["price"] = tx_display["price"].map(lambda v: f"{float(v):.2f}")
+        if "value" in tx_display.columns:
+            tx_display["value"] = tx_display["value"].map(lambda v: f"{float(v):.2f}")
         try:
             st.dataframe(
-                tx_style,
+                tx_display,
                 use_container_width=True,
                 column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
             )
         except Exception:
-            st.dataframe(tx_style, use_container_width=True)
+            st.dataframe(tx_display, use_container_width=True)
     else:
         st.write("No transactions yet.")
