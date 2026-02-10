@@ -8,6 +8,7 @@ from src.analysis.events import score_events_details
 from src.analysis.sentiment import analyze_news_sentiment_details
 from src.analysis.technicals import calculate_technicals
 from src.api.data_fetcher import get_alpaca_snapshot_features, get_earnings_calendar
+from src.api.data_fetcher import get_market_sentiment_news, get_x_recent_tweets
 from src.pipeline.decision_engine import (
     Signal,
     aggregate_confidence,
@@ -184,6 +185,30 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio
         reason="" if sentiment_ok else sentiment_reason,
     )
 
+    social_posts = get_x_recent_tweets(ticker, limit=12)
+    social_details = analyze_news_sentiment_details(social_posts) if social_posts else {"score": 0.0, "article_count": 0, "variance": 0.0, "mixed_opinions": False}
+    social_count = int(social_details.get("article_count", 0))
+    social_ok = social_count >= 6
+    social_signal = Signal(
+        name="social",
+        value=clamp(float(social_details.get("score", 0.0)), -1.0, 1.0),
+        confidence=clamp((social_count / 12.0) * (1.0 - min(float(social_details.get("variance", 0.0)), 1.0)), 0.0, 1.0) if social_ok else 0.0,
+        quality_ok=social_ok,
+        reason="" if social_ok else "insufficient_social_posts",
+    )
+
+    market_news = get_market_sentiment_news(limit=12)
+    market_details = analyze_news_sentiment_details(market_news) if market_news else {"score": 0.0, "article_count": 0, "variance": 0.0, "mixed_opinions": False}
+    market_count = int(market_details.get("article_count", 0))
+    market_ok = market_count >= 5
+    market_signal = Signal(
+        name="market",
+        value=clamp(float(market_details.get("score", 0.0)), -1.0, 1.0),
+        confidence=clamp((market_count / 12.0) * (1.0 - min(float(market_details.get("variance", 0.0)), 1.0)), 0.0, 1.0) if market_ok else 0.0,
+        quality_ok=market_ok,
+        reason="" if market_ok else "insufficient_market_news",
+    )
+
     earnings = get_earnings_calendar(ticker)
     earnings_ok, earnings_count = validate_earnings_payload(earnings)
     has_upcoming_earnings = earnings_ok and earnings_count > 0
@@ -239,6 +264,8 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio
         {
             "trend": trend_signal,
             "sentiment": sentiment_signal,
+            "social": social_signal,
+            "market": market_signal,
             "events": event_signal,
             "micro": micro_signal,
             "dip": dip_signal,
@@ -253,6 +280,8 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio
         "atr_pct": atr_pct_value,
         "article_count": len(headlines),
         "sentiment_article_count": sentiment_article_count,
+        "social_post_count": social_count,
+        "market_news_count": market_count,
         "event_article_count": event_article_count,
         "sentiment_variance": sentiment_variance,
         "sentiment_mixed": mixed_opinions,

@@ -43,6 +43,8 @@ def _fallback_config() -> dict[str, Any]:
         "weights": {
             "trend": 0.35,
             "sentiment": 0.25,
+            "social": 0.05,
+            "market": 0.05,
             "events": 0.15,
             "micro": 0.10,
             "dip": 0.10,
@@ -83,10 +85,10 @@ def _fallback_config() -> dict[str, Any]:
             "portfolio_risk_position_scale_min": 0.40,
         },
         "regimes": {
-            "bull": {"trend": 0.40, "sentiment": 0.24, "events": 0.12, "micro": 0.12, "dip": 0.08, "volatility": 0.04},
-            "bear": {"trend": 0.32, "sentiment": 0.20, "events": 0.16, "micro": 0.10, "dip": 0.14, "volatility": 0.08},
-            "volatile": {"trend": 0.30, "sentiment": 0.20, "events": 0.14, "micro": 0.08, "dip": 0.10, "volatility": 0.18},
-            "sideways": {"trend": 0.30, "sentiment": 0.26, "events": 0.16, "micro": 0.12, "dip": 0.10, "volatility": 0.06},
+            "bull": {"trend": 0.36, "sentiment": 0.20, "social": 0.06, "market": 0.06, "events": 0.12, "micro": 0.10, "dip": 0.06, "volatility": 0.04},
+            "bear": {"trend": 0.30, "sentiment": 0.16, "social": 0.05, "market": 0.10, "events": 0.15, "micro": 0.08, "dip": 0.10, "volatility": 0.06},
+            "volatile": {"trend": 0.28, "sentiment": 0.16, "social": 0.04, "market": 0.10, "events": 0.14, "micro": 0.07, "dip": 0.09, "volatility": 0.12},
+            "sideways": {"trend": 0.28, "sentiment": 0.20, "social": 0.06, "market": 0.08, "events": 0.14, "micro": 0.10, "dip": 0.08, "volatility": 0.06},
         },
         "stability": {
             "min_decision_hold_cycles": 2,

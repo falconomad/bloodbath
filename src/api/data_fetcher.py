@@ -15,6 +15,7 @@ load_dotenv()
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
 
 
 def _env_non_empty(name, default):
@@ -509,6 +510,59 @@ def _get_google_news_rss(ticker, limit=10):
             published = chunk[pub_s + 9 : pub_e].strip()
         items.append({"headline": headline, "source": source, "datetime": published})
     return items
+
+
+def get_x_recent_tweets(ticker, limit=20):
+    """Fetch recent tweets for ticker (free-tier friendly, low volume)."""
+    if not X_BEARER_TOKEN:
+        return []
+    try:
+        capped = max(5, min(int(limit), 20))
+    except Exception:
+        capped = 20
+    query = f"(${str(ticker).upper()} OR {str(ticker).upper()} stock) lang:en -is:retweet"
+    url = "https://api.x.com/2/tweets/search/recent"
+    headers = {"Authorization": f"Bearer {X_BEARER_TOKEN}"}
+    params = {
+        "query": query,
+        "max_results": capped,
+        "tweet.fields": "created_at,public_metrics,lang",
+    }
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=12)
+        if response.status_code in {401, 403, 429}:
+            return []
+        response.raise_for_status()
+        payload = response.json() if isinstance(response.json(), dict) else {}
+    except Exception:
+        return []
+    data = payload.get("data", []) if isinstance(payload, dict) else []
+    out = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        out.append(
+            {
+                "headline": text,
+                "source": "X",
+                "datetime": item.get("created_at"),
+                "metrics": item.get("public_metrics", {}) if isinstance(item.get("public_metrics"), dict) else {},
+            }
+        )
+    return out
+
+
+def get_market_sentiment_news(limit=12):
+    """S&P 500 market mood proxy from broad index ETFs."""
+    universe = ["SPY", "QQQ", "DIA"]
+    merged = []
+    for sym in universe:
+        rows = get_company_news(sym, lookback_days=3, limit=max(4, limit // len(universe)), structured=True)
+        merged.extend(rows)
+    return _merge_news_items(merged, [], limit=limit)
 
 
 def _fallback_single_ticker_fetch(tickers, period, interval):
