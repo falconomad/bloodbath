@@ -13,6 +13,7 @@ from src.backtesting.simple_backtester import (
     build_examples,
     evaluate_candidate,
     load_trace_entries,
+    sample_weight_candidates,
 )
 from src.pipeline.decision_engine import load_config
 
@@ -71,6 +72,14 @@ def run_experiment(
     variants = list(experiment_config.get("variants", []))
     if not variants:
         variants = [{"name": "baseline", "weights": base_cfg.get("weights", {})}]
+    auto_tune = experiment_config.get("auto_tune", {}) or {}
+    if bool(auto_tune.get("enabled", False)):
+        trials = int(auto_tune.get("trials", 24))
+        seed = int(auto_tune.get("seed", 11))
+        base = _normalize_weights(base_cfg.get("weights", {}))
+        sampled = sample_weight_candidates(base, trials=trials, seed=seed)
+        auto_variants = [{"name": f"auto_{idx:02d}", "weights": w} for idx, w in enumerate(sampled, start=1)]
+        variants = variants + auto_variants
 
     exec_cfg = experiment_config.get("execution", {})
     execution_model = ExecutionModel(
@@ -103,6 +112,7 @@ def run_experiment(
 
         train_scores = []
         test_scores = []
+        variant_split_rows: list[dict[str, Any]] = []
         for idx, ((tr0, tr1), (te0, te1)) in enumerate(splits):
             train_ex = examples[tr0:tr1]
             test_ex = examples[te0:te1]
@@ -113,37 +123,38 @@ def run_experiment(
             test_metrics = evaluate_candidate(test_ex, variant_cfg, variant_cfg["weights"], execution_model=execution_model)
             train_scores.append(float(train_metrics.get("objective", 0.0)))
             test_scores.append(float(test_metrics.get("objective", 0.0)))
-            rows.append(
-                {
-                    "variant": name,
-                    "split": idx,
-                    "train_objective": train_metrics.get("objective", 0.0),
-                    "test_objective": test_metrics.get("objective", 0.0),
-                    "test_total_return": test_metrics.get("total_return", 0.0),
-                    "test_win_rate": test_metrics.get("win_rate", 0.0),
-                    "test_trades": test_metrics.get("trades", 0.0),
-                    "test_sharpe_ratio": test_metrics.get("sharpe_ratio", 0.0),
-                    "test_sortino_ratio": test_metrics.get("sortino_ratio", 0.0),
-                    "test_max_drawdown": test_metrics.get("max_drawdown", 0.0),
-                    "test_expectancy_per_trade": test_metrics.get("expectancy_per_trade", 0.0),
-                }
-            )
+            split_row = {
+                "variant": name,
+                "split": idx,
+                "train_objective": train_metrics.get("objective", 0.0),
+                "test_objective": test_metrics.get("objective", 0.0),
+                "test_total_return": test_metrics.get("total_return", 0.0),
+                "test_win_rate": test_metrics.get("win_rate", 0.0),
+                "test_trades": test_metrics.get("trades", 0.0),
+                "test_sharpe_ratio": test_metrics.get("sharpe_ratio", 0.0),
+                "test_sortino_ratio": test_metrics.get("sortino_ratio", 0.0),
+                "test_max_drawdown": test_metrics.get("max_drawdown", 0.0),
+                "test_expectancy_per_trade": test_metrics.get("expectancy_per_trade", 0.0),
+            }
+            variant_split_rows.append(split_row)
+            rows.append(split_row)
 
         mean_train = (sum(train_scores) / len(train_scores)) if train_scores else -1e9
         mean_test = (sum(test_scores) / len(test_scores)) if test_scores else -1e9
+        denom = max(len(variant_split_rows), 1)
         rows.append(
             {
                 "variant": name,
                 "split": "aggregate",
                 "train_objective": mean_train,
                 "test_objective": mean_test,
-                "test_total_return": (sum(r["test_total_return"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
-                "test_win_rate": (sum(r["test_win_rate"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
-                "test_trades": (sum(r["test_trades"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
-                "test_sharpe_ratio": (sum(r["test_sharpe_ratio"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
-                "test_sortino_ratio": (sum(r["test_sortino_ratio"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
-                "test_max_drawdown": (sum(r["test_max_drawdown"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
-                "test_expectancy_per_trade": (sum(r["test_expectancy_per_trade"] for r in rows if r["variant"] == name and r["split"] != "aggregate") / max(len([r for r in rows if r["variant"] == name and r["split"] != "aggregate"]), 1)),
+                "test_total_return": sum(r["test_total_return"] for r in variant_split_rows) / denom,
+                "test_win_rate": sum(r["test_win_rate"] for r in variant_split_rows) / denom,
+                "test_trades": sum(r["test_trades"] for r in variant_split_rows) / denom,
+                "test_sharpe_ratio": sum(r["test_sharpe_ratio"] for r in variant_split_rows) / denom,
+                "test_sortino_ratio": sum(r["test_sortino_ratio"] for r in variant_split_rows) / denom,
+                "test_max_drawdown": sum(r["test_max_drawdown"] for r in variant_split_rows) / denom,
+                "test_expectancy_per_trade": sum(r["test_expectancy_per_trade"] for r in variant_split_rows) / denom,
             }
         )
 

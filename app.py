@@ -581,6 +581,37 @@ if trace_for_monitor:
     r3.metric("High Volatility Rate", f"{100 * high_vol_hits / total_entries:.1f}%")
     r4.metric("Low-Conf HOLD Rate", f"{100 * low_conf_hold_hits / total_entries:.1f}%")
 
+    quality_rows = []
+    for row in trace_for_monitor[-120:]:
+        signals_payload = row.get("signals", {}) or {}
+        total = 0
+        ok = 0
+        for payload in signals_payload.values():
+            if not isinstance(payload, dict):
+                continue
+            total += 1
+            if bool(payload.get("quality_ok", False)):
+                ok += 1
+        ratio = (ok / total) if total > 0 else 0.0
+        quality_rows.append(
+            {
+                "ts": str(row.get("ts", "")),
+                "quality_ratio": ratio,
+                "confidence": float(row.get("confidence", 0.0)),
+            }
+        )
+    if quality_rows:
+        qdf = pd.DataFrame(quality_rows)
+        qfig = px.line(
+            qdf,
+            x="ts",
+            y=["quality_ratio", "confidence"],
+            title="Signal Quality & Confidence Trend",
+            template=plot_template,
+        )
+        qfig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), paper_bgcolor=card, plot_bgcolor=card)
+        st.plotly_chart(qfig, use_container_width=True)
+
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
     baseline_capital = float(TOP20_STARTING_CAPITAL)

@@ -19,6 +19,7 @@ from src.advisor import (
     top20_manager,
 )
 from src.settings import TRADE_MODE
+from src.analytics.daily_summary import generate_daily_summary
 
 DB_AVAILABLE = True
 
@@ -269,6 +270,11 @@ def main():
         print("[worker][cycle] no analyses generated")
 
     save(history, transactions, positions, analyses)
+    try:
+        report = generate_daily_summary(trace_path="logs/recommendation_trace.jsonl", output_dir="artifacts/reports")
+        print(f"[worker][report] daily summary written: {report.get('output_json')}")
+    except Exception as exc:
+        print(f"[worker][report] failed to generate daily summary: {exc}")
     print("[worker][done] cycle complete")
 
 
