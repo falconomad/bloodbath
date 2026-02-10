@@ -306,9 +306,10 @@ st.markdown(
         font-size: 0.88rem;
         color: {muted_text};
         max-width: 78ch;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        line-height: 1.3;
       }}
       .kb-market-badge {{
         font-size: 0.82rem;
