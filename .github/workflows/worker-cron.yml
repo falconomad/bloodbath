@@ -29,6 +29,45 @@ jobs:
           pip install --disable-pip-version-check --no-input -r worker/requirements-worker.txt
           echo "[runner] dependency installation complete"
 
+      - name: Compute notification window flags
+        id: notify_flags
+        shell: bash
+        run: |
+          HOUR="$(date -u +%H)"
+          MINUTE="$(date -u +%M)"
+          EVENT="${{ github.event_name }}"
+          FIRST_RUN=false
+          LAST_RUN=false
+          if [ "$EVENT" = "schedule" ] && [ "$HOUR" = "13" ] && [ "$MINUTE" = "00" ]; then
+            FIRST_RUN=true
+          fi
+          if [ "$EVENT" = "schedule" ] && [ "$HOUR" = "21" ] && [ "$MINUTE" = "30" ]; then
+            LAST_RUN=true
+          fi
+          echo "first_run=$FIRST_RUN" >> "$GITHUB_OUTPUT"
+          echo "last_run=$LAST_RUN" >> "$GITHUB_OUTPUT"
+          echo "utc_now=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Email market-open reminder (first scheduled run)
+        if: steps.notify_flags.outputs.first_run == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          secure: true
+          subject: "[kai] Market-session worker started"
+          to: ${{ secrets.NOTIFY_EMAIL_TO }}
+          from: ${{ secrets.SMTP_FROM }}
+          body: |
+            Scheduled market-session worker has started.
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+            Run ID: ${{ github.run_id }}
+            Triggered at: ${{ steps.notify_flags.outputs.utc_now }}
+            Link: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
       - name: Run worker script
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -45,3 +84,23 @@ jobs:
           echo "[runner] starting worker script execution"
           python worker/auto_worker.py
           echo "[runner] worker script execution complete"
+
+      - name: Email market-close reminder (last scheduled run)
+        if: steps.notify_flags.outputs.last_run == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          secure: true
+          subject: "[kai] Last market-session worker completed"
+          to: ${{ secrets.NOTIFY_EMAIL_TO }}
+          from: ${{ secrets.SMTP_FROM }}
+          body: |
+            Last scheduled market-session worker has completed.
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+            Run ID: ${{ github.run_id }}
+            Completed at: ${{ steps.notify_flags.outputs.utc_now }}
+            Link: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}

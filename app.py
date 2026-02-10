@@ -4,6 +4,8 @@ import plotly.express as px
 import json
 import base64
 from pathlib import Path
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
 from src.settings import TOP20_STARTING_CAPITAL
@@ -428,6 +430,20 @@ def _with_logo_column(df: pd.DataFrame) -> pd.DataFrame:
         return None
 
 
+def _us_market_status(now_et: datetime | None = None) -> tuple[str, str]:
+    current = now_et or datetime.now(ZoneInfo("America/New_York"))
+    weekday = current.weekday()
+    open_t = time(hour=9, minute=30)
+    close_t = time(hour=16, minute=0)
+    if weekday >= 5:
+        return "CLOSED", "Weekend (US market closed)"
+    if open_t <= current.time() < close_t:
+        return "OPEN", f"Open now ({current.strftime('%I:%M %p ET')})"
+    if current.time() < open_t:
+        return "CLOSED", f"Opens at 09:30 AM ET (now {current.strftime('%I:%M %p ET')})"
+    return "CLOSED", f"Closed at 04:00 PM ET (now {current.strftime('%I:%M %p ET')})"
+
+
 skeleton_placeholder = st.empty()
 with skeleton_placeholder.container():
     show_dashboard_skeleton()
@@ -553,6 +569,12 @@ if selected_tickers:
 
 if decision_filter and not signals.empty and "decision" in signals.columns:
     signals = signals[signals["decision"].astype(str).str.upper().isin(decision_filter)]
+
+market_state, market_note = _us_market_status()
+st.subheader("Market Status")
+m1, m2 = st.columns([1, 3])
+m1.metric("US Equities", market_state)
+m2.caption(market_note)
 
 # Risk Monitor (from trace)
 trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
