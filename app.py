@@ -498,6 +498,33 @@ if selected_tickers:
 if decision_filter and not signals.empty and "decision" in signals.columns:
     signals = signals[signals["decision"].astype(str).str.upper().isin(decision_filter)]
 
+# Risk Monitor (from trace)
+trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
+if trace_for_monitor:
+    total_entries = max(len(trace_for_monitor), 1)
+    guardrail_hits = 0
+    veto_hits = 0
+    high_vol_hits = 0
+    low_conf_hold_hits = 0
+    for row in trace_for_monitor:
+        reasons = [str(r) for r in (row.get("decision_reasons", []) or [])]
+        decision = str(row.get("decision", "HOLD")).upper()
+        if any(r.startswith("guardrail:") for r in reasons):
+            guardrail_hits += 1
+        if any(r.startswith("veto:") for r in reasons):
+            veto_hits += 1
+        if "volatility:high" in reasons:
+            high_vol_hits += 1
+        if decision == "HOLD" and any(r.startswith("confidence:") for r in reasons):
+            low_conf_hold_hits += 1
+
+    st.subheader("Risk Monitor")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Guardrail Hit Rate", f"{100 * guardrail_hits / total_entries:.1f}%")
+    r2.metric("Veto Rate", f"{100 * veto_hits / total_entries:.1f}%")
+    r3.metric("High Volatility Rate", f"{100 * high_vol_hits / total_entries:.1f}%")
+    r4.metric("Low-Conf HOLD Rate", f"{100 * low_conf_hold_hits / total_entries:.1f}%")
+
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
     baseline_capital = float(TOP20_STARTING_CAPITAL)
