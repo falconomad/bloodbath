@@ -6,12 +6,31 @@ on:
     # Run every 10 minutes on weekdays (worker logic enforces market-session behavior).
     - cron: "0,10,20,30,40,50 * * * 1-5"
   workflow_dispatch:
+  repository_dispatch:
+    types: [worker-cron]
 
 jobs:
   run-worker:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Validate external dispatch signature
+        if: github.event_name == 'repository_dispatch'
+        shell: bash
+        env:
+          INCOMING_KEY: ${{ github.event.client_payload.key }}
+          EXPECTED_KEY: ${{ secrets.CRON_SHARED_KEY }}
+        run: |
+          if [ -z "$EXPECTED_KEY" ]; then
+            echo "CRON_SHARED_KEY secret is not configured."
+            exit 1
+          fi
+          if [ "$INCOMING_KEY" != "$EXPECTED_KEY" ]; then
+            echo "Invalid repository_dispatch key."
+            exit 1
+          fi
+          echo "repository_dispatch key validated."
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
