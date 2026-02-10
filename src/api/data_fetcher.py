@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from datetime import date, timedelta
 from urllib.parse import quote_plus
+import xml.etree.ElementTree as ET
 
 import finnhub
 import pandas as pd
@@ -478,53 +479,37 @@ def _get_google_news_rss(ticker, limit=10):
     query = quote_plus(f"{ticker} stock")
     url = (
         "https://news.google.com/rss/search"
-        f"?q={query}&hl={quote_plus(GOOGLE_NEWS_RSS_LANG)}&gl={quote_plus(GOOGLE_NEWS_RSS_REGION)}&ceid={quote_plus(GOOGLE_NEWS_RSS_REGION)}:{quote_plus(GOOGLE_NEWS_RSS_LANG)}"
+        f"?q={query}&hl={quote_plus(GOOGLE_NEWS_RSS_LANG)}&gl={quote_plus(GOOGLE_NEWS_RSS_REGION)}&ceid={quote_plus(GOOGLE_NEWS_RSS_REGION)}:en"
     )
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(
+            url,
+            timeout=10,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; kaibot/1.0; +https://github.com)",
+                "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+            },
+        )
         response.raise_for_status()
         text = response.text
     except Exception:
         return []
 
-    # Lightweight RSS parsing without extra dependencies.
+    try:
+        root = ET.fromstring(text)
+    except Exception:
+        return []
+
     items = []
-    cursor = 0
-    while len(items) < int(limit):
-        start = text.find("<item>", cursor)
-        if start < 0:
+    for item in root.findall(".//item"):
+        if len(items) >= int(limit):
             break
-        end = text.find("</item>", start)
-        if end < 0:
-            break
-        chunk = text[start:end]
-        cursor = end + 7
-
-        title_s = chunk.find("<title>")
-        title_e = chunk.find("</title>")
-        pub_s = chunk.find("<pubDate>")
-        pub_e = chunk.find("</pubDate>")
-        src_s = chunk.find("<source")
-        if src_s >= 0:
-            src_s = chunk.find(">", src_s)
-        src_e = chunk.find("</source>")
-
-        headline = ""
-        if title_s >= 0 and title_e > title_s:
-            headline = chunk[title_s + 7 : title_e].strip()
-        if not headline:
+        title = (item.findtext("title") or "").strip()
+        if not title:
             continue
-
-        source = "Google News"
-        if src_s >= 0 and src_e > src_s:
-            source_txt = chunk[src_s + 1 : src_e].strip()
-            if source_txt:
-                source = source_txt
-
-        published = None
-        if pub_s >= 0 and pub_e > pub_s:
-            published = chunk[pub_s + 9 : pub_e].strip()
-        items.append({"headline": headline, "source": source, "datetime": published})
+        source = (item.findtext("source") or "Google News").strip() or "Google News"
+        published = (item.findtext("pubDate") or "").strip() or None
+        items.append({"headline": title, "source": source, "datetime": published})
     return items
 
 
