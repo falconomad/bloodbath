@@ -120,18 +120,21 @@ st.markdown(
         align-items: center;
         gap: 0.6rem;
         margin: 0.1rem 0 0.8rem 0;
+        position: relative;
       }}
       .kb-sidebar-brand img {{
-        width: 2.3rem;
-        height: 2.3rem;
+        width: 4.3rem;
+        height: 4.3rem;
         object-fit: contain;
       }}
       .kb-sidebar-brand span {{
-        font-size: 1.28rem;
+        font-size: 2.28rem;
         font-weight: 800;
         letter-spacing: -0.01em;
         color: {text};
         line-height: 1;
+        position: absolute;
+        left: 62px;
       }}
       @media (max-width: 960px) {{
         .kb-sidebar-brand {{
