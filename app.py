@@ -321,9 +321,9 @@ st.markdown(
         border: 1px solid transparent;
       }}
       .kb-market-open {{
-        color: #0f5132;
-        background: rgba(46, 204, 113, 0.18);
-        border-color: rgba(46, 204, 113, 0.35);
+        color: #f8fffb;
+        background: #166534;
+        border-color: #1f7a41;
       }}
       .kb-market-closed {{
         color: #6b7280;
