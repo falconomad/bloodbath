@@ -22,6 +22,14 @@ class BacktestExample:
     risk_context: dict[str, Any]
 
 
+@dataclass
+class ExecutionModel:
+    fee_bps: float = 1.0
+    spread_bps: float = 5.0
+    slippage_bps: float = 3.0
+    fill_ratio: float = 1.0
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -128,10 +136,41 @@ def sample_weight_candidates(base_weights: dict[str, float], trials: int, seed: 
     return candidates
 
 
-def evaluate_candidate(examples: list[BacktestExample], cfg: dict[str, Any], weights: dict[str, float]) -> dict[str, float]:
+def _cost_rate(model: ExecutionModel) -> float:
+    # Entry + exit cost approximation with half-spread each side.
+    return (
+        (2.0 * model.fee_bps)
+        + (2.0 * model.slippage_bps)
+        + model.spread_bps
+    ) / 10_000.0
+
+
+def _executed_trade_return(decision: str, forward_return: float, model: ExecutionModel, position_size: float) -> float:
+    direction = 0.0
+    if decision == "BUY":
+        direction = 1.0
+    elif decision == "SELL":
+        direction = -1.0
+    if direction == 0.0:
+        return 0.0
+
+    fill = max(0.0, min(float(model.fill_ratio), 1.0))
+    exposure = max(0.0, min(float(position_size), 1.0)) * fill
+    gross = direction * float(forward_return) * exposure
+    costs = _cost_rate(model) * exposure
+    return gross - costs
+
+
+def evaluate_candidate(
+    examples: list[BacktestExample],
+    cfg: dict[str, Any],
+    weights: dict[str, float],
+    execution_model: ExecutionModel | None = None,
+) -> dict[str, float]:
     local_cfg = copy.deepcopy(cfg)
     local_cfg.setdefault("weights", {})
     local_cfg["weights"] = _normalize_weights(weights)
+    model = execution_model or ExecutionModel()
 
     pnl: list[float] = []
     trades = 0
@@ -146,7 +185,7 @@ def evaluate_candidate(examples: list[BacktestExample], cfg: dict[str, Any], wei
             weights=local_cfg.get("weights", {}),
             max_conflict_drop=local_cfg.get("risk", {}).get("max_confidence_drop_on_conflict", 0.75),
         )
-        decision, _reasons, _size = decide(
+        decision, _reasons, size = decide(
             ticker=ex.ticker,
             score=score,
             confidence=conf,
@@ -157,12 +196,8 @@ def evaluate_candidate(examples: list[BacktestExample], cfg: dict[str, Any], wei
             cfg=local_cfg,
         )
 
-        trade_ret = 0.0
-        if decision == "BUY":
-            trade_ret = ex.forward_return
-            trades += 1
-        elif decision == "SELL":
-            trade_ret = -ex.forward_return
+        trade_ret = _executed_trade_return(decision, ex.forward_return, model, size)
+        if decision in {"BUY", "SELL"}:
             trades += 1
 
         if decision in {"BUY", "SELL"} and trade_ret > 0:
@@ -191,10 +226,18 @@ def evaluate_candidate(examples: list[BacktestExample], cfg: dict[str, Any], wei
         "avg_trade_return": (sum(pnl) / trades) if trades > 0 else 0.0,
         "total_return": total_return,
         "objective": objective,
+        "execution_cost_rate": _cost_rate(model),
+        "fill_ratio": float(model.fill_ratio),
     }
 
 
-def tune_from_trace(trace_path: str, trials: int = 100, horizon: int = 1, seed: int = 7) -> dict[str, Any]:
+def tune_from_trace(
+    trace_path: str,
+    trials: int = 100,
+    horizon: int = 1,
+    seed: int = 7,
+    execution_model: ExecutionModel | None = None,
+) -> dict[str, Any]:
     cfg = load_config()
     entries = load_trace_entries(trace_path)
     examples = build_examples(entries, horizon=horizon)
@@ -205,10 +248,10 @@ def tune_from_trace(trace_path: str, trials: int = 100, horizon: int = 1, seed: 
     candidates = sample_weight_candidates(base_weights, trials=trials, seed=seed)
 
     best_weights = base_weights
-    best_metrics = evaluate_candidate(examples, cfg, base_weights)
+    best_metrics = evaluate_candidate(examples, cfg, base_weights, execution_model=execution_model)
 
     for w in candidates[1:]:
-        metrics = evaluate_candidate(examples, cfg, w)
+        metrics = evaluate_candidate(examples, cfg, w, execution_model=execution_model)
         if metrics["objective"] > best_metrics["objective"]:
             best_metrics = metrics
             best_weights = w
@@ -228,9 +271,25 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=100, help="Number of candidate weight sets")
     parser.add_argument("--horizon", type=int, default=1, help="Forward steps for return label")
     parser.add_argument("--seed", type=int, default=7, help="Random seed")
+    parser.add_argument("--fee-bps", type=float, default=1.0, help="Per-side transaction fee in bps")
+    parser.add_argument("--spread-bps", type=float, default=5.0, help="Round-trip bid/ask spread in bps")
+    parser.add_argument("--slippage-bps", type=float, default=3.0, help="Per-side slippage in bps")
+    parser.add_argument("--fill-ratio", type=float, default=1.0, help="Partial fill ratio in [0,1]")
     args = parser.parse_args()
 
-    result = tune_from_trace(args.trace, trials=args.trials, horizon=args.horizon, seed=args.seed)
+    execution_model = ExecutionModel(
+        fee_bps=args.fee_bps,
+        spread_bps=args.spread_bps,
+        slippage_bps=args.slippage_bps,
+        fill_ratio=args.fill_ratio,
+    )
+    result = tune_from_trace(
+        args.trace,
+        trials=args.trials,
+        horizon=args.horizon,
+        seed=args.seed,
+        execution_model=execution_model,
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
