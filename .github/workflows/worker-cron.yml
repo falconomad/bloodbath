@@ -38,10 +38,12 @@ jobs:
           EVENT="${{ github.event_name }}"
           FIRST_RUN=false
           LAST_RUN=false
-          if [ "$EVENT" = "schedule" ] && [ "$HOUR" = "13" ] && [ "$MINUTE" = "00" ]; then
+          # Tolerate cron startup jitter: treat first run as 13:00 +/- 14 min.
+          if [ "$EVENT" = "schedule" ] && [ "$HOUR" = "13" ] && [ "$MINUTE" -ge "00" ] && [ "$MINUTE" -le "14" ]; then
             FIRST_RUN=true
           fi
-          if [ "$EVENT" = "schedule" ] && [ "$HOUR" = "21" ] && [ "$MINUTE" = "30" ]; then
+          # Last run window: 21:30 +/- 14 min.
+          if [ "$EVENT" = "schedule" ] && [ "$HOUR" = "21" ] && [ "$MINUTE" -ge "30" ] && [ "$MINUTE" -le "44" ]; then
             LAST_RUN=true
           fi
           echo "first_run=$FIRST_RUN" >> "$GITHUB_OUTPUT"
