@@ -37,6 +37,10 @@ _alpaca_status_logged = False
 _alpaca_rate_limit_logged = False
 _alpaca_error_logged = False
 _alpaca_snapshot_logged = False
+_finnhub_news_rate_limited = False
+_company_news_cache = {}
+_market_news_cache = {}
+_earnings_cache = {}
 
 
 # Google RSS is always enabled with fixed defaults to reduce config complexity.
@@ -383,31 +387,42 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
 
 
 def get_company_news(ticker, lookback_days=7, limit=10, structured=False):
+    cache_key = (str(ticker).upper(), int(lookback_days), int(limit), bool(structured))
+    if cache_key in _company_news_cache:
+        return _company_news_cache[cache_key]
+
+    global _finnhub_news_rate_limited
     primary_news = []
-    try:
-        to_date = date.today()
-        from_date = to_date - timedelta(days=lookback_days)
-        news = client.company_news(
-            ticker,
-            _from=from_date.isoformat(),
-            to=to_date.isoformat(),
-        )
-        for n in news:
-            if not isinstance(n, dict):
-                continue
-            headline = str(n.get("headline", "")).strip()
-            if not headline:
-                continue
-            primary_news.append(
-                {
-                    "headline": headline,
-                    "source": str(n.get("source", "")).strip() or "Finnhub",
-                    "datetime": n.get("datetime"),
-                }
+    if not _finnhub_news_rate_limited:
+        try:
+            to_date = date.today()
+            from_date = to_date - timedelta(days=lookback_days)
+            news = client.company_news(
+                ticker,
+                _from=from_date.isoformat(),
+                to=to_date.isoformat(),
             )
-    except Exception as exc:
-        print(f"[data] {ticker}: company_news failed ({exc})")
-        primary_news = []
+            for n in news:
+                if not isinstance(n, dict):
+                    continue
+                headline = str(n.get("headline", "")).strip()
+                if not headline:
+                    continue
+                primary_news.append(
+                    {
+                        "headline": headline,
+                        "source": str(n.get("source", "")).strip() or "Finnhub",
+                        "datetime": n.get("datetime"),
+                    }
+                )
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "429" in msg or "api limit" in msg or "rate limit" in msg:
+                _finnhub_news_rate_limited = True
+                print(f"[data] {ticker}: company_news rate-limited; switching to RSS-only for this cycle")
+            else:
+                print(f"[data] {ticker}: company_news failed ({exc})")
+            primary_news = []
 
     rss_news = _get_google_news_rss(ticker, limit=min(limit, GOOGLE_NEWS_RSS_MAX)) if ENABLE_GOOGLE_NEWS_RSS else []
     merged = _merge_news_items(primary_news, rss_news, limit=limit)
@@ -416,6 +431,7 @@ def get_company_news(ticker, lookback_days=7, limit=10, structured=False):
     else:
         out = [str(n.get("headline", "")).strip() for n in merged if str(n.get("headline", "")).strip()]
     print(f"[data] {ticker}: news_primary={len(primary_news)} news_rss={len(rss_news)} merged={len(out)}")
+    _company_news_cache[cache_key] = out
     return out
 
 
@@ -557,12 +573,17 @@ def get_x_recent_tweets(ticker, limit=20):
 
 def get_market_sentiment_news(limit=12):
     """S&P 500 market mood proxy from broad index ETFs."""
+    cache_key = int(limit)
+    if cache_key in _market_news_cache:
+        return _market_news_cache[cache_key]
     universe = ["SPY", "QQQ", "DIA"]
     merged = []
     for sym in universe:
         rows = get_company_news(sym, lookback_days=3, limit=max(4, limit // len(universe)), structured=True)
         merged.extend(rows)
-    return _merge_news_items(merged, [], limit=limit)
+    out = _merge_news_items(merged, [], limit=limit)
+    _market_news_cache[cache_key] = out
+    return out
 
 
 def _fallback_single_ticker_fetch(tickers, period, interval):
@@ -654,6 +675,9 @@ def get_bulk_price_data(tickers, period="6mo", interval="1d"):
 
 
 def get_earnings_calendar(ticker, lookahead_days=30):
+    cache_key = (str(ticker).upper(), int(lookahead_days))
+    if cache_key in _earnings_cache:
+        return _earnings_cache[cache_key]
     start_date = date.today()
     end_date = start_date + timedelta(days=lookahead_days)
 
@@ -666,10 +690,12 @@ def get_earnings_calendar(ticker, lookahead_days=30):
         calendar = payload.get("earningsCalendar", []) if isinstance(payload, dict) else []
         out = calendar if isinstance(calendar, list) else []
         print(f"[data] {ticker}: earnings_count={len(out)}")
+        _earnings_cache[cache_key] = out
         return out
     except Exception:
         if not FINNHUB_KEY:
             print(f"[data] {ticker}: earnings_calendar skipped (missing FINNHUB_API_KEY)")
+            _earnings_cache[cache_key] = []
             return []
 
     try:
@@ -688,7 +714,18 @@ def get_earnings_calendar(ticker, lookahead_days=30):
         calendar = payload.get("earningsCalendar", []) if isinstance(payload, dict) else []
         out = calendar if isinstance(calendar, list) else []
         print(f"[data] {ticker}: earnings_count={len(out)}")
+        _earnings_cache[cache_key] = out
         return out
     except Exception as exc:
         print(f"[data] {ticker}: earnings_calendar failed ({exc})")
+        _earnings_cache[cache_key] = []
         return []
+
+
+def reset_cycle_caches():
+    """Clear per-run API caches; call once at worker cycle start."""
+    global _finnhub_news_rate_limited
+    _company_news_cache.clear()
+    _market_news_cache.clear()
+    _earnings_cache.clear()
+    _finnhub_news_rate_limited = False

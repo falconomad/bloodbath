@@ -135,7 +135,7 @@ def _sentiment_confidence(details: dict[str, Any], sentiment_ok: bool, cfg: dict
     return clamp(base * article_factor * diversity_factor * sample_factor * reliability_factor * (1.0 - disagreement_penalty), 0.0, 1.0)
 
 
-def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio_context=None):
+def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio_context=None, market_news=None):
     dip_meta = dip_meta or {}
     portfolio_context = portfolio_context or {}
     quality_cfg = cfg.get("quality", {})
@@ -197,7 +197,7 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio
         reason="" if social_ok else "insufficient_social_posts",
     )
 
-    market_news = get_market_sentiment_news(limit=12)
+    market_news = market_news if market_news is not None else get_market_sentiment_news(limit=12)
     market_details = analyze_news_sentiment_details(market_news) if market_news else {"score": 0.0, "article_count": 0, "variance": 0.0, "mixed_opinions": False}
     market_count = int(market_details.get("article_count", 0))
     market_ok = market_count >= 5
@@ -303,11 +303,18 @@ def generate_recommendation_core(
     cfg: dict[str, Any],
     decision_state: dict[str, dict[str, Any]],
     portfolio_context: dict[str, Any] | None = None,
+    market_news: list[dict[str, Any]] | None = None,
 ):
     headlines = safe_news(headlines)
     price = float(data["Close"].iloc[-1]) if data is not None and not data.empty and "Close" in data else 0.0
     trend, has_upcoming_earnings, signals, risk_context = _normalized_module_signals(
-        ticker=ticker, data=data, headlines=headlines, dip_meta=dip_meta, cfg=cfg, portfolio_context=portfolio_context
+        ticker=ticker,
+        data=data,
+        headlines=headlines,
+        dip_meta=dip_meta,
+        cfg=cfg,
+        portfolio_context=portfolio_context,
+        market_news=market_news,
     )
     weights, active_regime = resolve_effective_weights(cfg, risk_context)
     score = weighted_score(signals, weights)

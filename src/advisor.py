@@ -1,7 +1,9 @@
 from src.api.data_fetcher import (
     get_bulk_price_data,
     get_company_news,
+    get_market_sentiment_news,
     get_price_data,
+    reset_cycle_caches,
 )
 from src.analysis.dip import dip_bonus
 from src.pipeline.decision_engine import (
@@ -84,6 +86,7 @@ def generate_recommendation(
     cycle_idx=0,
     apply_stability_gate=False,
     portfolio_context=None,
+    market_news=None,
 ):
     data = price_data if price_data is not None else get_price_data(ticker)
     headlines = news if news is not None else get_company_news(ticker, structured=True)
@@ -97,6 +100,7 @@ def generate_recommendation(
         cfg=SCORING_CONFIG,
         decision_state=_DECISION_STATE,
         portfolio_context=portfolio_context,
+        market_news=market_news,
     )
 
 
@@ -301,8 +305,10 @@ def _portfolio_risk_context_for_ticker(ticker, analyses_so_far, candidates):
 def run_top20_cycle_with_signals():
     global _CYCLE_INDEX
     _CYCLE_INDEX += 1
+    reset_cycle_caches()
     analyses = []
     candidates = _build_candidate_list()
+    cycle_market_news = get_market_sentiment_news(limit=12)
 
     print(f"[cycle] Evaluating {len(candidates)} candidate tickers")
     for ticker, meta in candidates.items():
@@ -322,6 +328,7 @@ def run_top20_cycle_with_signals():
             cycle_idx=_CYCLE_INDEX,
             apply_stability_gate=True,
             portfolio_context=_portfolio_risk_context_for_ticker(ticker, analyses, candidates),
+            market_news=cycle_market_news,
         )
         final_score = float(rec["composite_score"])
         signal_conf = float(rec.get("signal_confidence", 0.0))
