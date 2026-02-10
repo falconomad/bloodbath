@@ -9,6 +9,7 @@ from src.db import get_connection, init_db
 from src.settings import TOP20_STARTING_CAPITAL
 from src.common.trace_utils import load_jsonl_dict_rows
 from src.analytics.explainability_report import generate_explainability_report
+from src.ui.stock_logos import get_logo_url
 
 # Polling refresh support. Prefer component if available, otherwise fall back to meta refresh.
 try:
@@ -368,6 +369,14 @@ def _load_latest_experiment_result():
     root = Path("artifacts/experiments")
     if not root.exists():
         return None
+
+
+def _with_logo_column(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or "ticker" not in df.columns:
+        return df
+    out = df.copy()
+    out["logo"] = out["ticker"].astype(str).map(get_logo_url)
+    return out
     json_files = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not json_files:
         return None
@@ -619,18 +628,27 @@ if not signals.empty:
     if "decision" in signal_view.columns:
         signal_view["decision"] = signal_view["decision"].astype(str).str.upper()
     signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
-    signal_cols = [col for col in ["time", "ticker", "decision", "score", "price", "distance_to_trigger"] if col in signal_view.columns]
+    signal_view = _with_logo_column(signal_view)
+    signal_cols = [col for col in ["logo", "time", "ticker", "decision", "score", "price", "distance_to_trigger"] if col in signal_view.columns]
     signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]).head(20)
     s1, s2 = st.columns([2, 1])
     with s1:
-        signal_style = signal_table.style.format(
+        signal_display = signal_table.style.format(
             {"score": "{:.3f}", "price": "{:.2f}", "distance_to_trigger": "{:.3f}"}
         )
         if "score" in signal_cols:
-            signal_style = signal_style.map(_color_signed, subset=["score"])
+            signal_display = signal_display.map(_color_signed, subset=["score"])
         if "decision" in signal_cols:
-            signal_style = signal_style.map(_color_decision, subset=["decision"])
-        st.dataframe(signal_style, use_container_width=True, hide_index=True)
+            signal_display = signal_display.map(_color_decision, subset=["decision"])
+        try:
+            st.dataframe(
+                signal_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
+            )
+        except Exception:
+            st.dataframe(signal_display, use_container_width=True, hide_index=True)
     with s2:
         signal_chart_df = signal_table.sort_values("score", ascending=False).head(12)
         sig_fig = px.bar(
@@ -648,7 +666,7 @@ else:
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
-        tx = transactions.copy()
+        tx = _with_logo_column(transactions.copy())
         if "action" in tx.columns:
             tx["action"] = tx["action"].astype(str).str.upper()
         if "value" not in tx.columns and {"shares", "price"}.issubset(tx.columns):
@@ -659,6 +677,13 @@ with st.expander("Transaction History", expanded=False):
             tx_style = tx_style.map(_color_decision, subset=["action"])
         if "value" in tx.columns:
             tx_style = tx_style.map(_color_signed, subset=["value"])
-        st.dataframe(tx_style, use_container_width=True)
+        try:
+            st.dataframe(
+                tx_style,
+                use_container_width=True,
+                column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
+            )
+        except Exception:
+            st.dataframe(tx_style, use_container_width=True)
     else:
         st.write("No transactions yet.")
