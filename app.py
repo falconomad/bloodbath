@@ -115,31 +115,27 @@ st.markdown(
         z-index: 1000;
         backdrop-filter: blur(10px);
       }}
-      [data-testid="stHeader"]::before {{
-        content: "";
-        position: absolute;
-        left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
-        top: 54%;
-        width: 3.8rem;
-        height: 2.8rem;
-        transform: translateY(-50%);
-        border-radius: 0.5rem;
-        background-image: url('{logo_uri}');
-        background-size: contain;
-        background-repeat: no-repeat;
-        background-position: center;
+      .kb-sidebar-brand {{
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        margin: 0 0 0.6rem 0;
       }}
-      [data-testid="stHeader"]::after {{
-        content: "kaibot";
-        position: absolute;
-        left: max(calc((100vw - 1200px) / 2 + 4.2rem), 4.2rem);
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: 1.62rem;
-        font-weight: 600;
-        letter-spacing: -0.02em;
+      .kb-sidebar-brand img {{
+        width: 1.7rem;
+        height: 1.7rem;
+        object-fit: contain;
+      }}
+      .kb-sidebar-brand span {{
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
         color: {text};
-        line-height: 1;
+      }}
+      @media (max-width: 960px) {{
+        .kb-sidebar-brand {{
+          display: none;
+        }}
       }}
       [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{
         visibility: hidden;
@@ -450,6 +446,11 @@ all_tickers = sorted(
 )
 
 with st.sidebar:
+    if logo_uri:
+        st.markdown(
+            f'<div class="kb-sidebar-brand"><img src="{logo_uri}" alt="kaibot"/><span>kaibot</span></div>',
+            unsafe_allow_html=True,
+        )
     st.subheader("At-a-Glance")
     auto_refresh = st.toggle("Auto-refresh", value=True, help="Poll database periodically for new worker updates.")
     refresh_seconds = st.slider("Refresh every (seconds)", min_value=5, max_value=300, value=10, step=5)
@@ -635,7 +636,7 @@ if not signals.empty:
         signal_view["decision"] = signal_view["decision"].astype(str).str.upper()
     signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
     signal_view = _with_logo_column(signal_view)
-    signal_cols = [col for col in ["logo", "time", "ticker", "decision", "score", "price", "distance_to_trigger"] if col in signal_view.columns]
+    signal_cols = [col for col in ["logo", "ticker", "decision", "score", "price", "distance_to_trigger", "time"] if col in signal_view.columns]
     signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]).head(20)
     s1, s2 = st.columns([2, 1])
     with s1:
