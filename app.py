@@ -127,7 +127,7 @@ st.markdown(
       [data-testid="stHeader"]::after {{
         content: "kaibot";
         position: absolute;
-        left: max(calc((100vw - 1200px) / 2 + 4.6rem), 4.6rem);
+        left: max(calc((100vw - 1200px) / 2 + 4.2rem), 4.2rem);
         top: 50%;
         transform: translateY(-50%);
         font-size: 1.62rem;
