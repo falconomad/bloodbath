@@ -673,6 +673,23 @@ with st.sidebar:
             f'<div class="kb-sidebar-brand"><img src="{logo_uri}" alt="kaibot"/><span>kaibot</span></div>',
             unsafe_allow_html=True,
         )
+    market_state, market_note = _us_market_status()
+    market_feed = _market_feed_oneliner()
+    badge_cls = "kb-market-open" if market_state == "OPEN" else "kb-market-closed"
+    st.markdown(
+        f"""
+        <div class="kb-market-card">
+          <div class="kb-market-meta">
+            <div class="kb-market-title">US Equities</div>
+            <div class="kb-market-note">{market_note}</div>
+            <div class="kb-market-feed">{market_feed}</div>
+          </div>
+          <div class="kb-market-badge {badge_cls}">{market_state}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.subheader("At-a-Glance")
     auto_refresh = st.toggle("Auto-refresh", value=False, help="Poll database periodically for new worker updates.")
     refresh_seconds = st.slider("Refresh every (seconds)", min_value=5, max_value=300, value=10, step=5)
@@ -681,10 +698,6 @@ with st.sidebar:
             st_autorefresh(interval=int(refresh_seconds * 1000), key="dashboard_autorefresh")
         else:
             st.warning("`streamlit-autorefresh` is not installed; auto-refresh is disabled.")
-
-    st.markdown("**Dashboard Filters**")
-    selected_tickers = st.multiselect("Tickers", options=all_tickers, default=[])
-    decision_filter = st.multiselect("Decisions", options=["BUY", "SELL", "HOLD"], default=["BUY", "SELL", "HOLD"])
     st.markdown("**Recommendation Trace**")
     trace_rows = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
     if trace_rows:
@@ -723,34 +736,6 @@ with st.sidebar:
             st.dataframe(sidebar_exp, use_container_width=True, hide_index=True)
     else:
         st.caption("No experiment artifacts yet.")
-
-if selected_tickers:
-    if not positions.empty and "ticker" in positions.columns:
-        positions = positions[positions["ticker"].astype(str).isin(selected_tickers)]
-    if not transactions.empty and "ticker" in transactions.columns:
-        transactions = transactions[transactions["ticker"].astype(str).isin(selected_tickers)]
-    if not signals.empty and "ticker" in signals.columns:
-        signals = signals[signals["ticker"].astype(str).isin(selected_tickers)]
-
-if decision_filter and not signals.empty and "decision" in signals.columns:
-    signals = signals[signals["decision"].astype(str).str.upper().isin(decision_filter)]
-
-market_state, market_note = _us_market_status()
-market_feed = _market_feed_oneliner()
-badge_cls = "kb-market-open" if market_state == "OPEN" else "kb-market-closed"
-st.markdown(
-    f"""
-    <div class="kb-market-card">
-      <div class="kb-market-meta">
-        <div class="kb-market-title">US Equities</div>
-        <div class="kb-market-note">{market_note}</div>
-        <div class="kb-market-feed">{market_feed}</div>
-      </div>
-      <div class="kb-market-badge {badge_cls}">{market_state}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 
 # Risk Monitor (from trace)
 trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
