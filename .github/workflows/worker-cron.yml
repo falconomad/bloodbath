@@ -4,7 +4,7 @@ name: AI Fund Manager Worker
 on:
   schedule:
     # Run every 10 minutes on weekdays (worker logic enforces market-session behavior).
-    - cron: "*/10 * * * 1-5"
+    - cron: "0,10,20,30,40,50 * * * 1-5"
   workflow_dispatch:
 
 jobs:
