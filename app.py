@@ -118,19 +118,20 @@ st.markdown(
       .kb-sidebar-brand {{
         display: flex;
         align-items: center;
-        gap: 0.45rem;
-        margin: 0 0 0.6rem 0;
+        gap: 0.6rem;
+        margin: 0.1rem 0 0.8rem 0;
       }}
       .kb-sidebar-brand img {{
-        width: 1.7rem;
-        height: 1.7rem;
+        width: 2.3rem;
+        height: 2.3rem;
         object-fit: contain;
       }}
       .kb-sidebar-brand span {{
-        font-size: 1.05rem;
-        font-weight: 700;
+        font-size: 1.28rem;
+        font-weight: 800;
         letter-spacing: -0.01em;
         color: {text};
+        line-height: 1;
       }}
       @media (max-width: 960px) {{
         .kb-sidebar-brand {{
