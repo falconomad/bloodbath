@@ -203,6 +203,11 @@ st.markdown(
       .stDataFrame [data-testid="stDataFrameResizable"] {{
         border-radius: 16px;
       }}
+      [data-testid="stDataFrame"] img {{
+        width: 18px !important;
+        height: 18px !important;
+        object-fit: contain;
+      }}
       div[data-testid="stExpander"] details summary p {{
         color: {text} !important;
         font-weight: 500;
@@ -579,33 +584,6 @@ if not portfolio.empty:
             )
             st.plotly_chart(alloc_top_fig, use_container_width=True)
 
-            alloc_table = _with_logo_column(alloc_view_top.copy())
-            alloc_table["allocation_pct"] = (
-                (alloc_table["market_value"] / alloc_table["market_value"].sum()) * 100
-                if alloc_table["market_value"].sum() > 0
-                else 0.0
-            )
-            if "pnl_pct" in alloc_table.columns:
-                alloc_table["pnl_pct_display"] = alloc_table["pnl_pct"] * 100
-            cols = [c for c in ["logo", "ticker", "market_value", "allocation_pct", "pnl", "pnl_pct_display"] if c in alloc_table.columns]
-            alloc_display = alloc_table[cols].copy()
-            if "market_value" in alloc_display.columns:
-                alloc_display["market_value"] = alloc_display["market_value"].map(lambda v: f"${float(v):,.2f}")
-            if "allocation_pct" in alloc_display.columns:
-                alloc_display["allocation_pct"] = alloc_display["allocation_pct"].map(lambda v: f"{float(v):.2f}%")
-            if "pnl" in alloc_display.columns:
-                alloc_display["pnl"] = alloc_display["pnl"].map(lambda v: f"${float(v):,.2f}")
-            if "pnl_pct_display" in alloc_display.columns:
-                alloc_display["pnl_pct_display"] = alloc_display["pnl_pct_display"].map(lambda v: f"{float(v):.2f}%")
-            try:
-                st.dataframe(
-                    alloc_display,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
-                )
-            except Exception:
-                st.dataframe(alloc_display, use_container_width=True, hide_index=True)
         else:
             st.info("No allocation snapshot available yet.")
     with g2:
