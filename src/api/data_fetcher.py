@@ -42,6 +42,9 @@ _finnhub_news_rate_limited = False
 _company_news_cache = {}
 _market_news_cache = {}
 _earnings_cache = {}
+_x_status_logged = False
+_x_missing_token_logged = False
+_x_error_logged = False
 
 
 # Google RSS is always enabled with fixed defaults to reduce config complexity.
@@ -515,28 +518,54 @@ def _get_google_news_rss(ticker, limit=10):
 
 def get_x_recent_tweets(ticker, limit=20):
     """Fetch recent tweets for ticker (free-tier friendly, low volume)."""
+    global _x_status_logged, _x_missing_token_logged, _x_error_logged
     if not X_BEARER_TOKEN:
+        if not _x_missing_token_logged:
+            print("[data] X sentiment disabled (missing X_BEARER_TOKEN)")
+            _x_missing_token_logged = True
         return []
     try:
         capped = max(5, min(int(limit), 20))
     except Exception:
         capped = 20
     query = f"(${str(ticker).upper()} OR {str(ticker).upper()} stock) lang:en -is:retweet"
-    url = "https://api.x.com/2/tweets/search/recent"
     headers = {"Authorization": f"Bearer {X_BEARER_TOKEN}"}
     params = {
         "query": query,
         "max_results": capped,
         "tweet.fields": "created_at,public_metrics,lang",
     }
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=12)
-        if response.status_code in {401, 403, 429}:
-            return []
-        response.raise_for_status()
-        payload = response.json() if isinstance(response.json(), dict) else {}
-    except Exception:
+    payload = {}
+    last_status = None
+    last_error = ""
+    for url in ("https://api.x.com/2/tweets/search/recent", "https://api.twitter.com/2/tweets/search/recent"):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=12)
+            last_status = int(response.status_code)
+            if response.status_code in {401, 403, 429}:
+                # Try fallback host before giving up.
+                if url.endswith("api.twitter.com/2/tweets/search/recent"):
+                    if not _x_error_logged:
+                        print(f"[data] X sentiment request blocked (status={response.status_code})")
+                        _x_error_logged = True
+                continue
+            response.raise_for_status()
+            response_json = response.json()
+            payload = response_json if isinstance(response_json, dict) else {}
+            if not _x_status_logged:
+                print("[data] X sentiment feed enabled")
+                _x_status_logged = True
+            break
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+
+    if not payload:
+        if (last_status is None) and last_error and not _x_error_logged:
+            print(f"[data] X sentiment request failed: {last_error}")
+            _x_error_logged = True
         return []
+
     data = payload.get("data", []) if isinstance(payload, dict) else []
     out = []
     for item in data:
