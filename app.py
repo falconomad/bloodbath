@@ -17,44 +17,13 @@ try:
 except Exception:  # pragma: no cover
     st_autorefresh = None
 
-st.set_page_config(page_title="kaibot", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="kaibot", page_icon="assets/kaibot_logo.svg", layout="wide")
 
-logo_svg = """
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
-  <rect width="300" height="300" rx="40" fill="#0f172a"/>
-  <g fill="#ffffff">
-    <rect x="75" y="70" width="150" height="120" rx="26"/>
-    <line x1="150" y1="70" x2="150" y2="40" stroke="#ffffff" stroke-width="10"/>
-    <circle cx="150" cy="34" r="8"/>
-  </g>
-  <g fill="#0f172a">
-    <circle cx="120" cy="125" r="14"/>
-    <circle cx="180" cy="125" r="14"/>
-  </g>
-  <defs>
-    <linearGradient id="chartGrad" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#3b82f6"/>
-    </linearGradient>
-  </defs>
-  <g fill="url(#chartGrad)">
-    <rect x="90" y="200" width="20" height="30" rx="6"/>
-    <rect x="120" y="180" width="20" height="50" rx="6"/>
-    <rect x="150" y="165" width="20" height="65" rx="6"/>
-    <rect x="180" y="150" width="20" height="80" rx="6"/>
-  </g>
-  <polyline
-    points="95,205 130,175 160,185 200,145"
-    fill="none"
-    stroke="#ffffff"
-    stroke-width="12"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-  <polygon points="200,145 192,160 212,150" fill="#ffffff"/>
-</svg>
-"""
-logo_uri = f"data:image/svg+xml;base64,{base64.b64encode(logo_svg.encode('utf-8')).decode('utf-8')}"
+logo_path = Path("assets/kaibot_logo.svg")
+logo_uri = ""
+if logo_path.exists():
+    logo_uri = f"data:image/svg+xml;base64,{base64.b64encode(logo_path.read_bytes()).decode('utf-8')}"
+
 
 theme_base = st.get_option("theme.base") or "light"
 is_dark = theme_base.lower() == "dark"
@@ -146,8 +115,8 @@ st.markdown(
         position: absolute;
         left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
         top: 54%;
-        width: 2.2rem;
-        height: 2.2rem;
+        width: 2.8rem;
+        height: 2.8rem;
         transform: translateY(-50%);
         border-radius: 0.5rem;
         background-image: url('{logo_uri}');
@@ -158,7 +127,7 @@ st.markdown(
       [data-testid="stHeader"]::after {{
         content: "kaibot";
         position: absolute;
-        left: max(calc((100vw - 1200px) / 2 + 3.8rem), 3.8rem);
+        left: max(calc((100vw - 1200px) / 2 + 4.6rem), 4.6rem);
         top: 50%;
         transform: translateY(-50%);
         font-size: 1.62rem;
