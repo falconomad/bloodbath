@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import json
 import base64
+import requests
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -300,6 +302,14 @@ st.markdown(
         color: {text};
         font-weight: 500;
       }}
+      .kb-market-feed {{
+        font-size: 0.88rem;
+        color: {muted_text};
+        max-width: 78ch;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }}
       .kb-market-badge {{
         font-size: 0.82rem;
         font-weight: 700;
@@ -543,13 +553,59 @@ def _us_market_status(now_et: datetime | None = None) -> tuple[str, str]:
     weekday = current.weekday()
     open_t = time(hour=9, minute=30)
     close_t = time(hour=16, minute=0)
+    open_dt = current.replace(hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0)
+    close_dt = current.replace(hour=close_t.hour, minute=close_t.minute, second=0, microsecond=0)
+
+    def _human_delta(seconds: float) -> str:
+        secs = max(int(seconds), 0)
+        hours = secs // 3600
+        minutes = (secs % 3600) // 60
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        return f"{minutes}m"
+
     if weekday >= 5:
         return "CLOSED", "Weekend (US market closed)"
     if open_t <= current.time() < close_t:
-        return "OPEN", f"Open now ({current.strftime('%I:%M %p ET')})"
+        return "OPEN", f"Closes in {_human_delta((close_dt - current).total_seconds())}"
     if current.time() < open_t:
-        return "CLOSED", f"Opens at 09:30 AM ET (now {current.strftime('%I:%M %p ET')})"
-    return "CLOSED", f"Closed at 04:00 PM ET (now {current.strftime('%I:%M %p ET')})"
+        return "CLOSED", f"Opens in {_human_delta((open_dt - current).total_seconds())}"
+
+    # After close on weekday, show countdown to next weekday open.
+    days_ahead = 1
+    while True:
+        nxt = current + pd.Timedelta(days=days_ahead)
+        if nxt.weekday() < 5:
+            next_open = nxt.replace(hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0)
+            break
+        days_ahead += 1
+    return "CLOSED", f"Opens in {_human_delta((next_open - current).total_seconds())}"
+
+
+@st.cache_data(ttl=300)
+def _market_feed_oneliner() -> str:
+    url = "https://news.google.com/rss/search?q=US+stock+market&hl=en-US&gl=US&ceid=US:en"
+    try:
+        response = requests.get(
+            url,
+            timeout=8,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; kaibot/1.0)",
+                "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+            },
+        )
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+        item = root.find(".//item")
+        if item is None:
+            return "Market feed unavailable right now."
+        title = (item.findtext("title") or "").strip()
+        source = (item.findtext("source") or "Google News").strip()
+        if not title:
+            return "Market feed unavailable right now."
+        return f"{source}: {title}"
+    except Exception:
+        return "Market feed unavailable right now."
 
 
 skeleton_placeholder = st.empty()
@@ -679,6 +735,7 @@ if decision_filter and not signals.empty and "decision" in signals.columns:
     signals = signals[signals["decision"].astype(str).str.upper().isin(decision_filter)]
 
 market_state, market_note = _us_market_status()
+market_feed = _market_feed_oneliner()
 badge_cls = "kb-market-open" if market_state == "OPEN" else "kb-market-closed"
 st.markdown(
     f"""
@@ -686,6 +743,7 @@ st.markdown(
       <div class="kb-market-meta">
         <div class="kb-market-title">US Equities</div>
         <div class="kb-market-note">{market_note}</div>
+        <div class="kb-market-feed">{market_feed}</div>
       </div>
       <div class="kb-market-badge {badge_cls}">{market_state}</div>
     </div>
