@@ -426,7 +426,7 @@ skeleton_placeholder.empty()
 with st.sidebar:
     st.subheader("At-a-Glance")
     auto_refresh = st.toggle("Auto-refresh", value=True, help="Poll database periodically for new worker updates.")
-    refresh_seconds = st.slider("Refresh every (seconds)", min_value=5, max_value=60, value=15, step=5)
+    refresh_seconds = st.slider("Refresh every (seconds)", min_value=30, max_value=300, value=120, step=30)
     if auto_refresh:
         if st_autorefresh is not None:
             st_autorefresh(interval=int(refresh_seconds * 1000), key="dashboard_autorefresh")
