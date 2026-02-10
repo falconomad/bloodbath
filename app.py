@@ -272,6 +272,53 @@ st.markdown(
       [data-testid="stPlotlyChart"] {{
         animation-delay: 0.15s;
       }}
+      .kb-market-card {{
+        border: 1px solid {border};
+        border-radius: 16px;
+        padding: 0.85rem 1rem;
+        background: linear-gradient(135deg, {card} 0%, {accent_soft} 100%);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.9rem;
+      }}
+      .kb-market-meta {{
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }}
+      .kb-market-title {{
+        font-size: 0.84rem;
+        color: {muted_text};
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        font-weight: 600;
+      }}
+      .kb-market-note {{
+        font-size: 0.96rem;
+        color: {text};
+        font-weight: 500;
+      }}
+      .kb-market-badge {{
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 0.34rem 0.62rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
+      }}
+      .kb-market-open {{
+        color: #0f5132;
+        background: rgba(46, 204, 113, 0.18);
+        border-color: rgba(46, 204, 113, 0.35);
+      }}
+      .kb-market-closed {{
+        color: #6b7280;
+        background: rgba(148, 163, 184, 0.16);
+        border-color: rgba(148, 163, 184, 0.32);
+      }}
       @keyframes bb-fade-rise {{
         from {{
           opacity: 0;
@@ -632,10 +679,19 @@ if decision_filter and not signals.empty and "decision" in signals.columns:
     signals = signals[signals["decision"].astype(str).str.upper().isin(decision_filter)]
 
 market_state, market_note = _us_market_status()
-st.subheader("Market Status")
-m1, m2 = st.columns([1, 3])
-m1.metric("US Equities", market_state)
-m2.caption(market_note)
+badge_cls = "kb-market-open" if market_state == "OPEN" else "kb-market-closed"
+st.markdown(
+    f"""
+    <div class="kb-market-card">
+      <div class="kb-market-meta">
+        <div class="kb-market-title">US Equities</div>
+        <div class="kb-market-note">{market_note}</div>
+      </div>
+      <div class="kb-market-badge {badge_cls}">{market_state}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Risk Monitor (from trace)
 trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
