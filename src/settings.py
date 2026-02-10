@@ -29,6 +29,13 @@ def _str_from_env(name, default):
     return str(raw)
 
 
+def _bool_from_env(name, default):
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _trade_mode_from_env():
     mode = _str_from_env("TRADE_MODE", "NORMAL").strip().upper()
     if mode not in {"NORMAL", "AGGRESSIVE"}:
@@ -55,3 +62,6 @@ TOP20_FEE_BPS = _float_from_env("TOP20_FEE_BPS", 1.0)
 
 # Fetch pacing for free-tier data providers.
 FETCH_BATCH_SIZE = _int_from_env("FETCH_BATCH_SIZE", 20)
+
+# Optional execution aggressiveness control (default off for safety).
+ENABLE_POSITION_ROTATION = _bool_from_env("ENABLE_POSITION_ROTATION", False)

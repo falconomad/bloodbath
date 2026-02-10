@@ -25,6 +25,10 @@ class Top20AutoManager:
         max_sector_allocation=0.45,
         max_buy_exposure_per_sector_step=0.30,
         max_positions_per_sector=2,
+        enable_position_rotation=False,
+        rotation_min_score_gap=0.15,
+        rotation_sell_fraction=0.35,
+        rotation_max_swaps_per_step=1,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
@@ -45,6 +49,10 @@ class Top20AutoManager:
         self.max_sector_allocation = float(max_sector_allocation)
         self.max_buy_exposure_per_sector_step = float(max_buy_exposure_per_sector_step)
         self.max_positions_per_sector = int(max_positions_per_sector)
+        self.enable_position_rotation = bool(enable_position_rotation)
+        self.rotation_min_score_gap = float(rotation_min_score_gap)
+        self.rotation_sell_fraction = float(rotation_sell_fraction)
+        self.rotation_max_swaps_per_step = int(rotation_max_swaps_per_step)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
@@ -338,6 +346,39 @@ class Top20AutoManager:
             if self._sector_position_count(self._sector(c["ticker"], analysis_by_ticker), analysis_by_ticker)
             < self.max_positions_per_sector
         ]
+
+        # Optional: rotate out weaker holdings to free capital for stronger new BUY candidates.
+        if self.enable_position_rotation and self.cash <= 1e-6 and buy_candidates:
+            swaps = 0
+            held_rank = []
+            for held_ticker in list(self.holdings.keys()):
+                held_rec = analysis_by_ticker.get(held_ticker, {})
+                held_score = float(held_rec.get("score", 0.0))
+                held_rank.append((held_ticker, held_score))
+            held_rank.sort(key=lambda x: x[1])  # weakest first
+            outside_candidates = [c for c in buy_candidates if c["ticker"] not in self.holdings]
+            outside_candidates.sort(key=lambda c: float(c.get("score", 0.0)), reverse=True)
+
+            while swaps < max(self.rotation_max_swaps_per_step, 0) and held_rank and outside_candidates:
+                weakest_ticker, weakest_score = held_rank[0]
+                strongest = outside_candidates[0]
+                strongest_score = float(strongest.get("score", 0.0))
+                if strongest_score < (weakest_score + self.rotation_min_score_gap):
+                    break
+                price = float(self.last_price_by_ticker.get(weakest_ticker, self.holdings[weakest_ticker]["avg_cost"]))
+                if not self._is_valid_price(price):
+                    held_rank.pop(0)
+                    continue
+                self._sell_fraction(
+                    timestamp,
+                    weakest_ticker,
+                    price,
+                    fraction=max(min(self.rotation_sell_fraction, 0.95), 0.05),
+                    action="SELL_ROTATE",
+                )
+                swaps += 1
+                held_rank.pop(0)
+                outside_candidates.pop(0)
 
         if self.cash > 0:
             equity = self._portfolio_value()

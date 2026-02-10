@@ -153,6 +153,7 @@ def run_sp500_cycle(decision, data):
 from src.core.sp500_list import TOP20, TOP20_SECTOR, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
 from src.settings import (
+    ENABLE_POSITION_ROTATION,
     TOP20_STARTING_CAPITAL,
     TOP20_MIN_BUY_SCORE,
     TRADE_MODE,
@@ -172,6 +173,10 @@ top20_manager = Top20AutoManager(
     min_buy_score=TOP20_MIN_BUY_SCORE,
     slippage_bps=TOP20_SLIPPAGE_BPS,
     fee_bps=TOP20_FEE_BPS,
+    enable_position_rotation=ENABLE_POSITION_ROTATION,
+    rotation_min_score_gap=0.15,
+    rotation_sell_fraction=0.35,
+    rotation_max_swaps_per_step=1,
 )
 
 
