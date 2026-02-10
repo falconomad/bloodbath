@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 from datetime import date, timedelta
+from urllib.parse import quote_plus
 
 import finnhub
 import pandas as pd
@@ -35,6 +36,13 @@ _alpaca_status_logged = False
 _alpaca_rate_limit_logged = False
 _alpaca_error_logged = False
 _alpaca_snapshot_logged = False
+
+
+# Google RSS is always enabled with fixed defaults to reduce config complexity.
+ENABLE_GOOGLE_NEWS_RSS = True
+GOOGLE_NEWS_RSS_LANG = "en-US"
+GOOGLE_NEWS_RSS_REGION = "US"
+GOOGLE_NEWS_RSS_MAX = 10
 
 
 def _cache_dir():
@@ -374,6 +382,7 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
 
 
 def get_company_news(ticker, lookback_days=7, limit=10, structured=False):
+    primary_news = []
     try:
         to_date = date.today()
         from_date = to_date - timedelta(days=lookback_days)
@@ -382,29 +391,124 @@ def get_company_news(ticker, lookback_days=7, limit=10, structured=False):
             _from=from_date.isoformat(),
             to=to_date.isoformat(),
         )
-        if structured:
-            out = []
-            for n in news[:limit]:
-                if not isinstance(n, dict):
-                    continue
-                headline = str(n.get("headline", "")).strip()
-                if not headline:
-                    continue
-                out.append(
-                    {
-                        "headline": headline,
-                        "source": str(n.get("source", "")).strip(),
-                        "datetime": n.get("datetime"),
-                    }
-                )
-        else:
-            headlines = [n.get("headline", "").strip() for n in news]
-            out = [h for h in headlines if h][:limit]
-        print(f"[data] {ticker}: news_count={len(out)}")
-        return out
+        for n in news:
+            if not isinstance(n, dict):
+                continue
+            headline = str(n.get("headline", "")).strip()
+            if not headline:
+                continue
+            primary_news.append(
+                {
+                    "headline": headline,
+                    "source": str(n.get("source", "")).strip() or "Finnhub",
+                    "datetime": n.get("datetime"),
+                }
+            )
     except Exception as exc:
         print(f"[data] {ticker}: company_news failed ({exc})")
+        primary_news = []
+
+    rss_news = _get_google_news_rss(ticker, limit=min(limit, GOOGLE_NEWS_RSS_MAX)) if ENABLE_GOOGLE_NEWS_RSS else []
+    merged = _merge_news_items(primary_news, rss_news, limit=limit)
+    if structured:
+        out = merged
+    else:
+        out = [str(n.get("headline", "")).strip() for n in merged if str(n.get("headline", "")).strip()]
+    print(f"[data] {ticker}: news_primary={len(primary_news)} news_rss={len(rss_news)} merged={len(out)}")
+    return out
+
+
+def _normalize_headline(text):
+    return " ".join(str(text or "").strip().lower().split())
+
+
+def _item_key(item):
+    headline = _normalize_headline(item.get("headline", ""))
+    source = str(item.get("source", "")).strip().lower()
+    dt = str(item.get("datetime", "")).strip()
+    dt_bucket = dt[:13] if dt else ""
+    return (headline, source, dt_bucket)
+
+
+def _merge_news_items(primary, secondary, limit=10):
+    merged = []
+    seen = set()
+    for item in (primary or []):
+        key = _item_key(item)
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+        if len(merged) >= int(limit):
+            return merged
+    for item in (secondary or []):
+        key = _item_key(item)
+        if not key[0]:
+            continue
+        # Deduplicate mostly by headline even across sources for same cycle.
+        headline_only_key = (key[0], "", "")
+        if key in seen or headline_only_key in seen:
+            continue
+        seen.add(key)
+        seen.add(headline_only_key)
+        merged.append(item)
+        if len(merged) >= int(limit):
+            break
+    return merged
+
+
+def _get_google_news_rss(ticker, limit=10):
+    query = quote_plus(f"{ticker} stock")
+    url = (
+        "https://news.google.com/rss/search"
+        f"?q={query}&hl={quote_plus(GOOGLE_NEWS_RSS_LANG)}&gl={quote_plus(GOOGLE_NEWS_RSS_REGION)}&ceid={quote_plus(GOOGLE_NEWS_RSS_REGION)}:{quote_plus(GOOGLE_NEWS_RSS_LANG)}"
+    )
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        text = response.text
+    except Exception:
         return []
+
+    # Lightweight RSS parsing without extra dependencies.
+    items = []
+    cursor = 0
+    while len(items) < int(limit):
+        start = text.find("<item>", cursor)
+        if start < 0:
+            break
+        end = text.find("</item>", start)
+        if end < 0:
+            break
+        chunk = text[start:end]
+        cursor = end + 7
+
+        title_s = chunk.find("<title>")
+        title_e = chunk.find("</title>")
+        pub_s = chunk.find("<pubDate>")
+        pub_e = chunk.find("</pubDate>")
+        src_s = chunk.find("<source")
+        if src_s >= 0:
+            src_s = chunk.find(">", src_s)
+        src_e = chunk.find("</source>")
+
+        headline = ""
+        if title_s >= 0 and title_e > title_s:
+            headline = chunk[title_s + 7 : title_e].strip()
+        if not headline:
+            continue
+
+        source = "Google News"
+        if src_s >= 0 and src_e > src_s:
+            source_txt = chunk[src_s + 1 : src_e].strip()
+            if source_txt:
+                source = source_txt
+
+        published = None
+        if pub_s >= 0 and pub_e > pub_s:
+            published = chunk[pub_s + 9 : pub_e].strip()
+        items.append({"headline": headline, "source": source, "datetime": published})
+    return items
 
 
 def _fallback_single_ticker_fetch(tickers, period, interval):

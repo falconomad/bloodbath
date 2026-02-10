@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.analysis.events import score_events
+from src.analysis.events import score_events_details
 from src.analysis.sentiment import analyze_news_sentiment_details
 from src.analysis.technicals import calculate_technicals
 from src.api.data_fetcher import get_alpaca_snapshot_features, get_earnings_calendar
@@ -187,7 +187,8 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio
     earnings = get_earnings_calendar(ticker)
     earnings_ok, earnings_count = validate_earnings_payload(earnings)
     has_upcoming_earnings = earnings_ok and earnings_count > 0
-    event_score = float(score_events(headlines, has_upcoming_earnings=has_upcoming_earnings))
+    event_details = score_events_details(headlines, has_upcoming_earnings=has_upcoming_earnings)
+    event_score = float(event_details.get("score", 0.0))
     min_news_articles = int(quality_cfg.get("min_news_articles", 3))
     events_ok, events_reason, event_article_count = validate_news_headlines(headlines, min_news_articles)
     events_ok = events_ok or has_upcoming_earnings
@@ -259,6 +260,7 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta, cfg, portfolio
         "portfolio_drawdown": float(portfolio_context.get("portfolio_drawdown", 0.0)),
         "portfolio_avg_correlation": float(portfolio_context.get("portfolio_avg_correlation", 0.0)),
         "ticker_sector_allocation": float(portfolio_context.get("ticker_sector_allocation", 0.0)),
+        "event_details": event_details,
     }
 
 
@@ -315,6 +317,7 @@ def generate_recommendation_core(
             "signals": {k: s.as_dict() for k, s in signals.items()},
             "conflict_ratio": round(conflicts, 6),
             "risk_context": risk_context,
+            "event_details": risk_context.get("event_details", {}),
         }
     )
 
@@ -329,6 +332,7 @@ def generate_recommendation_core(
         "upcoming_earnings": has_upcoming_earnings,
         "event_detected": event_flag,
         "event_score": event_score,
+        "event_details": risk_context.get("event_details", {}),
         "market_regime": risk_context.get("market_regime", "default"),
         "active_regime": active_regime,
         "composite_score": round(score, 4),

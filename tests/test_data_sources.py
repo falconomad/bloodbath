@@ -7,6 +7,53 @@ from src.api import data_fetcher
 
 
 class DataSourceTests(unittest.TestCase):
+    @patch("src.api.data_fetcher.ENABLE_GOOGLE_NEWS_RSS", True)
+    @patch("src.api.data_fetcher._get_google_news_rss")
+    @patch("src.api.data_fetcher.client")
+    def test_get_company_news_merges_primary_and_google_rss(self, mock_client, mock_rss):
+        mock_client.company_news.return_value = [
+            {"headline": "Apple beats estimates", "source": "Reuters", "datetime": 1739203200},
+            {"headline": "Apple launches new device", "source": "Bloomberg", "datetime": 1739206800},
+        ]
+        mock_rss.return_value = [
+            {"headline": "Apple beats estimates", "source": "Reuters", "datetime": "Mon, 10 Feb 2026 08:00:00 GMT"},
+            {"headline": "Apple AI strategy update", "source": "The Verge", "datetime": "Mon, 10 Feb 2026 09:00:00 GMT"},
+        ]
+
+        news = data_fetcher.get_company_news("AAPL", structured=True, limit=5)
+
+        self.assertEqual(len(news), 3)
+        headlines = [n["headline"] for n in news]
+        self.assertIn("Apple beats estimates", headlines)
+        self.assertIn("Apple launches new device", headlines)
+        self.assertIn("Apple AI strategy update", headlines)
+
+    @patch("src.api.data_fetcher.requests.get")
+    def test_google_news_rss_parser_extracts_items(self, mock_get):
+        xml = """
+        <rss><channel>
+          <item>
+            <title>Alpha headline</title>
+            <source url="https://example.com">Example</source>
+            <pubDate>Mon, 10 Feb 2026 09:00:00 GMT</pubDate>
+          </item>
+          <item>
+            <title>Beta headline</title>
+            <source url="https://example.org">Example Org</source>
+            <pubDate>Mon, 10 Feb 2026 10:00:00 GMT</pubDate>
+          </item>
+        </channel></rss>
+        """
+        resp = unittest.mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.text = xml
+        mock_get.return_value = resp
+
+        items = data_fetcher._get_google_news_rss("AAPL", limit=2)
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["headline"], "Alpha headline")
+        self.assertEqual(items[1]["source"], "Example Org")
+
     @patch("src.api.data_fetcher.client")
     def test_get_company_news_structured_payload(self, mock_client):
         mock_client.company_news.return_value = [
