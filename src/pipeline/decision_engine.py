@@ -511,3 +511,26 @@ def write_trace(payload: dict[str, Any]) -> None:
     event = {"ts": datetime.now(timezone.utc).isoformat(), **payload}
     with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, separators=(",", ":"), default=str) + "\n")
+    # Persist trace in Postgres as primary source for dashboard/explainability.
+    try:
+        from src.db import get_connection
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO recommendation_trace (ts, ticker, payload_json)
+            VALUES (%s, %s, %s)
+            """,
+            (
+                str(event.get("ts", "")),
+                str(event.get("ticker", "")),
+                json.dumps(event, separators=(",", ":"), default=str),
+            ),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception:
+        # Best-effort persistence: file trace remains as fallback.
+        pass

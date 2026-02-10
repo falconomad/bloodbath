@@ -76,6 +76,17 @@ def init_db():
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS recommendation_trace (
+            id BIGSERIAL PRIMARY KEY,
+            ts TEXT,
+            ticker TEXT,
+            payload_json TEXT
+        );
+    """
+    )
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS worker_runs (
             run_key TEXT PRIMARY KEY,
             created_at TIMESTAMPTZ DEFAULT NOW()

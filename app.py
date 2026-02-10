@@ -541,6 +541,36 @@ def _build_trace_lookup(trace_rows):
     return lookup
 
 
+def _load_trace_rows_db(limit: int = 2000) -> list[dict]:
+    if limit <= 0:
+        return []
+    try:
+        conn = get_connection()
+        df = pd.read_sql(
+            """
+            SELECT payload_json
+            FROM recommendation_trace
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            conn,
+            params=[int(limit)],
+        )
+        conn.close()
+        rows = []
+        for raw in df.get("payload_json", pd.Series(dtype=str)).tolist():
+            try:
+                payload = json.loads(str(raw))
+                if isinstance(payload, dict):
+                    rows.append(payload)
+            except Exception:
+                continue
+        rows.reverse()
+        return rows
+    except Exception:
+        return []
+
+
 def _style_decision_cols(df: pd.DataFrame, cols: list[str]):
     styler = df.style
     for col in cols:
@@ -699,7 +729,9 @@ with st.sidebar:
         else:
             st.warning("`streamlit-autorefresh` is not installed; auto-refresh is disabled.")
     st.markdown("**Recommendation Trace**")
-    trace_rows = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
+    trace_rows = _load_trace_rows_db(limit=2000)
+    if not trace_rows:
+        trace_rows = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
     if trace_rows:
         explain_report = generate_explainability_report(trace_rows, max_examples=8)
         decision_counts = explain_report.get("decision_counts", {}) or {}
@@ -738,7 +770,9 @@ with st.sidebar:
         st.caption("No experiment artifacts yet.")
 
 # Risk Monitor (from trace)
-trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
+trace_for_monitor = _load_trace_rows_db(limit=3000)
+if not trace_for_monitor:
+    trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
 trace_lookup = _build_trace_lookup(trace_for_monitor)
 if trace_for_monitor:
     total_entries = max(len(trace_for_monitor), 1)
