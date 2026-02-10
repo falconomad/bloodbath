@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import base64
 import json
-from pathlib import Path
 
 from src.db import get_connection, init_db
 from src.settings import TOP20_STARTING_CAPITAL
@@ -17,13 +15,7 @@ try:
 except Exception:  # pragma: no cover
     st_autorefresh = None
 
-st.set_page_config(page_title="KAI", page_icon="🤖", layout="wide")
-
-logo_path = Path("assets/bloodbath_logo.svg")
-logo_uri = ""
-if logo_path.exists():
-    logo_bytes = logo_path.read_bytes()
-    logo_uri = f"data:image/svg+xml;base64,{base64.b64encode(logo_bytes).decode('utf-8')}"
+st.set_page_config(page_title="kaibot", page_icon="🤖", layout="wide")
 
 theme_base = st.get_option("theme.base") or "light"
 is_dark = theme_base.lower() == "dark"
@@ -112,22 +104,12 @@ st.markdown(
       }}
       [data-testid="stHeader"]::before {{
         content: "";
-        position: absolute;
-        left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
-        top: 54%;
-        width: 10rem;
-        height: 2.7rem;
-        transform: translateY(-50%);
-        border-radius: 0.6rem;
-        background-image: url('{logo_uri}');
-        background-size: contain;
-        background-repeat: no-repeat;
-        background-position: center;
+        display: none;
       }}
       [data-testid="stHeader"]::after {{
-        content: "KAI";
+        content: "kaibot";
         position: absolute;
-        left: max(calc((100vw - 1200px) / 2 + 4.1rem), 4.1rem);
+        left: max(calc((100vw - 1200px) / 2 + 1rem), 1rem);
         top: 50%;
         transform: translateY(-50%);
         font-size: 1.62rem;
