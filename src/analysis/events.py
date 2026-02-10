@@ -31,6 +31,8 @@ def score_events(news: Iterable[str] | None, has_upcoming_earnings: bool = False
 
     if news:
         for headline in news:
+            if isinstance(headline, dict):
+                headline = headline.get("headline", "")
             if not isinstance(headline, str):
                 continue
             text = headline.lower()

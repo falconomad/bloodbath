@@ -86,7 +86,12 @@ def validate_micro_features(micro: dict[str, Any] | None) -> tuple[bool, str, di
 
 
 def validate_news_headlines(headlines: list[str] | None, min_articles: int) -> tuple[bool, str, int]:
-    clean = [h for h in (headlines or []) if isinstance(h, str) and h.strip()]
+    clean = []
+    for h in (headlines or []):
+        if isinstance(h, str) and h.strip():
+            clean.append(h)
+        elif isinstance(h, dict) and str(h.get("headline", "")).strip():
+            clean.append(h)
     count = len(clean)
     if count < int(min_articles):
         return False, "too_few_articles", count

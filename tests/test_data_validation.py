@@ -42,6 +42,15 @@ class DataValidationTests(unittest.TestCase):
         self.assertEqual(reason2, "too_few_articles")
         self.assertEqual(count2, 1)
 
+    def test_validate_news_headlines_supports_structured_items(self):
+        ok, reason, count = validate_news_headlines(
+            [{"headline": "a"}, {"headline": " "}, {"x": 1}, {"headline": "b"}],
+            min_articles=2,
+        )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+        self.assertEqual(count, 2)
+
     def test_validate_earnings_payload(self):
         ok, count = validate_earnings_payload([1, 2])
         self.assertTrue(ok)

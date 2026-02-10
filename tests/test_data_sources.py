@@ -8,6 +8,18 @@ from src.api import data_fetcher
 
 class DataSourceTests(unittest.TestCase):
     @patch("src.api.data_fetcher.client")
+    def test_get_company_news_structured_payload(self, mock_client):
+        mock_client.company_news.return_value = [
+            {"headline": "A", "source": "Reuters", "datetime": 1739203200},
+            {"headline": "B", "source": "Bloomberg", "datetime": 1739206800},
+        ]
+        news = data_fetcher.get_company_news("AAPL", structured=True, limit=2)
+        self.assertEqual(len(news), 2)
+        self.assertTrue(isinstance(news[0], dict))
+        self.assertIn("headline", news[0])
+        self.assertIn("source", news[0])
+
+    @patch("src.api.data_fetcher.client")
     def test_get_earnings_calendar_uses_finnhub_client(self, mock_client):
         mock_client.earnings_calendar.return_value = {
             "earningsCalendar": [{"symbol": "AAPL", "date": "2026-01-20"}]

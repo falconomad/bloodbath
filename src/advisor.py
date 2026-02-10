@@ -5,7 +5,7 @@ from src.api.data_fetcher import (
     get_price_data,
     get_alpaca_snapshot_features,
 )
-from src.analysis.sentiment import analyze_news_sentiment
+from src.analysis.sentiment import analyze_news_sentiment_details
 from src.analysis.technicals import calculate_technicals
 from src.analysis.events import score_events
 from src.analysis.dip import dip_bonus
@@ -50,7 +50,13 @@ def _trend_to_score(trend):
 def _safe_news(news):
     if not news:
         return []
-    return [n for n in news if isinstance(n, str) and n.strip()]
+    cleaned = []
+    for n in news:
+        if isinstance(n, str) and n.strip():
+            cleaned.append(n)
+        elif isinstance(n, dict) and str(n.get("headline", "")).strip():
+            cleaned.append(n)
+    return cleaned
 
 
 def _recent_growth_score(data, lookback=20):
@@ -196,14 +202,21 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
         reason="" if price_ok else price_validation.reason,
     )
 
-    sentiment = float(analyze_news_sentiment(headlines)) if headlines else 0.0
+    sentiment_details = analyze_news_sentiment_details(headlines) if headlines else {
+        "score": 0.0,
+        "variance": 0.0,
+        "article_count": 0,
+        "mixed_opinions": False,
+    }
+    sentiment = float(sentiment_details.get("score", 0.0))
     min_sentiment_articles = int(quality_cfg.get("min_sentiment_articles", 4))
     sentiment_ok, sentiment_reason, sentiment_article_count = validate_news_headlines(headlines, min_sentiment_articles)
-    sentiment_variance = min(abs(sentiment), 1.0)
+    sentiment_variance = min(float(sentiment_details.get("variance", 0.0)), 1.0)
+    mixed_opinions = bool(sentiment_details.get("mixed_opinions", False))
     sentiment_signal = Signal(
         name="sentiment",
         value=sentiment,
-        confidence=(0.35 + 0.65 * sentiment_variance) if sentiment_ok else 0.0,
+        confidence=((0.35 + 0.65 * max(abs(sentiment), 0.0)) * (0.75 if mixed_opinions else 1.0)) if sentiment_ok else 0.0,
         quality_ok=sentiment_ok,
         reason="" if sentiment_ok else sentiment_reason,
     )
@@ -275,12 +288,14 @@ def _normalized_module_signals(ticker, data, headlines, dip_meta=None):
         "article_count": len(headlines),
         "sentiment_article_count": sentiment_article_count,
         "event_article_count": event_article_count,
+        "sentiment_variance": sentiment_variance,
+        "sentiment_mixed": mixed_opinions,
     }
 
 
 def generate_recommendation(ticker, price_data=None, news=None, dip_meta=None, cycle_idx=0, apply_stability_gate=False):
     data = price_data if price_data is not None else get_price_data(ticker)
-    headlines = _safe_news(news if news is not None else get_company_news(ticker))
+    headlines = _safe_news(news if news is not None else get_company_news(ticker, structured=True))
     price = _as_float(data["Close"].iloc[-1]) if data is not None and not data.empty and "Close" in data else 0.0
     trend, has_upcoming_earnings, signals, risk_context = _normalized_module_signals(
         ticker=ticker, data=data, headlines=headlines, dip_meta=dip_meta
@@ -502,7 +517,7 @@ def run_top20_cycle_with_signals():
             continue
 
         price = _as_float(data["Close"].iloc[-1])
-        headlines = get_company_news(ticker)
+        headlines = get_company_news(ticker, structured=True)
         print(f"[cycle] {ticker}: headlines={len(headlines)}")
         rec = generate_recommendation(
             ticker,

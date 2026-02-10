@@ -373,7 +373,7 @@ def get_price_data(ticker, period="6mo", interval="1d", max_retries=1):
     return pd.DataFrame()
 
 
-def get_company_news(ticker, lookback_days=7, limit=10):
+def get_company_news(ticker, lookback_days=7, limit=10, structured=False):
     try:
         to_date = date.today()
         from_date = to_date - timedelta(days=lookback_days)
@@ -382,8 +382,24 @@ def get_company_news(ticker, lookback_days=7, limit=10):
             _from=from_date.isoformat(),
             to=to_date.isoformat(),
         )
-        headlines = [n.get("headline", "").strip() for n in news]
-        out = [h for h in headlines if h][:limit]
+        if structured:
+            out = []
+            for n in news[:limit]:
+                if not isinstance(n, dict):
+                    continue
+                headline = str(n.get("headline", "")).strip()
+                if not headline:
+                    continue
+                out.append(
+                    {
+                        "headline": headline,
+                        "source": str(n.get("source", "")).strip(),
+                        "datetime": n.get("datetime"),
+                    }
+                )
+        else:
+            headlines = [n.get("headline", "").strip() for n in news]
+            out = [h for h in headlines if h][:limit]
         print(f"[data] {ticker}: news_count={len(out)}")
         return out
     except Exception as exc:
