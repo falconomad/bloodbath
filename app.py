@@ -427,6 +427,14 @@ else:
 
 skeleton_placeholder.empty()
 
+all_tickers = sorted(
+    set(
+        [str(t) for t in positions.get("ticker", pd.Series(dtype=str)).dropna().tolist()]
+        + [str(t) for t in transactions.get("ticker", pd.Series(dtype=str)).dropna().tolist()]
+        + [str(t) for t in signals.get("ticker", pd.Series(dtype=str)).dropna().tolist()]
+    )
+)
+
 with st.sidebar:
     st.subheader("At-a-Glance")
     auto_refresh = st.toggle("Auto-refresh", value=True, help="Poll database periodically for new worker updates.")
@@ -436,6 +444,10 @@ with st.sidebar:
             st_autorefresh(interval=int(refresh_seconds * 1000), key="dashboard_autorefresh")
         else:
             st.warning("`streamlit-autorefresh` is not installed; auto-refresh is disabled.")
+
+    st.markdown("**Dashboard Filters**")
+    selected_tickers = st.multiselect("Tickers", options=all_tickers, default=[])
+    decision_filter = st.multiselect("Decisions", options=["BUY", "SELL", "HOLD"], default=["BUY", "SELL", "HOLD"])
     st.markdown("**Recommendation Trace**")
     trace_rows = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
     if trace_rows:
@@ -475,26 +487,56 @@ with st.sidebar:
     else:
         st.caption("No experiment artifacts yet.")
 
+if selected_tickers:
+    if not positions.empty and "ticker" in positions.columns:
+        positions = positions[positions["ticker"].astype(str).isin(selected_tickers)]
+    if not transactions.empty and "ticker" in transactions.columns:
+        transactions = transactions[transactions["ticker"].astype(str).isin(selected_tickers)]
+    if not signals.empty and "ticker" in signals.columns:
+        signals = signals[signals["ticker"].astype(str).isin(selected_tickers)]
+
+if decision_filter and not signals.empty and "decision" in signals.columns:
+    signals = signals[signals["decision"].astype(str).str.upper().isin(decision_filter)]
+
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
     baseline_capital = float(TOP20_STARTING_CAPITAL)
     change_pct = ((latest - baseline_capital) / baseline_capital) * 100 if baseline_capital > 0 else 0.0
+    running_peak = portfolio["value"].cummax()
+    drawdown_series = (running_peak - portfolio["value"]) / running_peak.replace(0, pd.NA)
+    latest_drawdown = float(drawdown_series.fillna(0).iloc[-1]) if not drawdown_series.empty else 0.0
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Current Portfolio Value", f"${latest:,.2f}")
     c2.metric("Net Return", f"{change_pct:+.2f}%")
     c3.metric("Tracked Cycles", f"{len(portfolio)}")
+    c4.metric("Current Drawdown", f"{100 * latest_drawdown:.2f}%")
 
-    growth_fig = px.area(
-        portfolio,
-        x="time",
-        y="value",
-        title="Portfolio Growth",
-        template=plot_template,
-    )
-    growth_fig.update_traces(line_color=accent, fillcolor=accent_soft)
-    growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
-    st.plotly_chart(growth_fig, use_container_width=True)
+    g1, g2 = st.columns([2, 1])
+    with g1:
+        growth_fig = px.area(
+            portfolio,
+            x="time",
+            y="value",
+            title="Portfolio Growth",
+            template=plot_template,
+        )
+        growth_fig.update_traces(line_color=accent, fillcolor=accent_soft)
+        growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
+        st.plotly_chart(growth_fig, use_container_width=True)
+    with g2:
+        dd_df = portfolio[["time"]].copy()
+        dd_df["drawdown_pct"] = drawdown_series.fillna(0) * 100
+        dd_fig = px.area(
+            dd_df,
+            x="time",
+            y="drawdown_pct",
+            title="Drawdown %",
+            template=plot_template,
+        )
+        dd_fig.update_traces(line_color=down_color, fillcolor="rgba(217,48,37,0.18)")
+        dd_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
+        st.plotly_chart(dd_fig, use_container_width=True)
 else:
     st.info("No portfolio data yet — worker has not run.")
 
@@ -505,15 +547,29 @@ if not signals.empty:
         signal_view["decision"] = signal_view["decision"].astype(str).str.upper()
     signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
     signal_cols = [col for col in ["time", "ticker", "decision", "score", "price", "distance_to_trigger"] if col in signal_view.columns]
-    signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False])
-    signal_style = signal_table.style.format(
-        {"score": "{:.3f}", "price": "{:.2f}", "distance_to_trigger": "{:.3f}"}
-    )
-    if "score" in signal_cols:
-        signal_style = signal_style.map(_color_signed, subset=["score"])
-    if "decision" in signal_cols:
-        signal_style = signal_style.map(_color_decision, subset=["decision"])
-    st.dataframe(signal_style, use_container_width=True, hide_index=True)
+    signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]).head(20)
+    s1, s2 = st.columns([2, 1])
+    with s1:
+        signal_style = signal_table.style.format(
+            {"score": "{:.3f}", "price": "{:.2f}", "distance_to_trigger": "{:.3f}"}
+        )
+        if "score" in signal_cols:
+            signal_style = signal_style.map(_color_signed, subset=["score"])
+        if "decision" in signal_cols:
+            signal_style = signal_style.map(_color_decision, subset=["decision"])
+        st.dataframe(signal_style, use_container_width=True, hide_index=True)
+    with s2:
+        signal_chart_df = signal_table.sort_values("score", ascending=False).head(12)
+        sig_fig = px.bar(
+            signal_chart_df,
+            x="ticker",
+            y="score",
+            color="decision" if "decision" in signal_chart_df.columns else None,
+            title="Signal Score Snapshot",
+            template=plot_template,
+        )
+        sig_fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
+        st.plotly_chart(sig_fig, use_container_width=True)
 else:
     st.caption("No latest signal data yet.")
 
