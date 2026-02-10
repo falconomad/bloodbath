@@ -769,66 +769,10 @@ with st.sidebar:
     else:
         st.caption("No experiment artifacts yet.")
 
-# Risk Monitor (from trace)
 trace_for_monitor = _load_trace_rows_db(limit=3000)
 if not trace_for_monitor:
     trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
 trace_lookup = _build_trace_lookup(trace_for_monitor)
-if trace_for_monitor:
-    total_entries = max(len(trace_for_monitor), 1)
-    guardrail_hits = 0
-    veto_hits = 0
-    high_vol_hits = 0
-    low_conf_hold_hits = 0
-    for row in trace_for_monitor:
-        reasons = [str(r) for r in (row.get("decision_reasons", []) or [])]
-        decision = str(row.get("decision", "HOLD")).upper()
-        if any(r.startswith("guardrail:") for r in reasons):
-            guardrail_hits += 1
-        if any(r.startswith("veto:") for r in reasons):
-            veto_hits += 1
-        if "volatility:high" in reasons:
-            high_vol_hits += 1
-        if decision == "HOLD" and any(r.startswith("confidence:") for r in reasons):
-            low_conf_hold_hits += 1
-
-    st.subheader("Risk Monitor")
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Guardrail Hit Rate", f"{100 * guardrail_hits / total_entries:.1f}%")
-    r2.metric("Veto Rate", f"{100 * veto_hits / total_entries:.1f}%")
-    r3.metric("High Volatility Rate", f"{100 * high_vol_hits / total_entries:.1f}%")
-    r4.metric("Low-Conf HOLD Rate", f"{100 * low_conf_hold_hits / total_entries:.1f}%")
-
-    quality_rows = []
-    for row in trace_for_monitor[-120:]:
-        signals_payload = row.get("signals", {}) or {}
-        total = 0
-        ok = 0
-        for payload in signals_payload.values():
-            if not isinstance(payload, dict):
-                continue
-            total += 1
-            if bool(payload.get("quality_ok", False)):
-                ok += 1
-        ratio = (ok / total) if total > 0 else 0.0
-        quality_rows.append(
-            {
-                "ts": str(row.get("ts", "")),
-                "quality_ratio": ratio,
-                "confidence": float(row.get("confidence", 0.0)),
-            }
-        )
-    if quality_rows:
-        qdf = pd.DataFrame(quality_rows)
-        qfig = px.line(
-            qdf,
-            x="ts",
-            y=["quality_ratio", "confidence"],
-            title="Signal Quality & Confidence Trend",
-            template=plot_template,
-        )
-        qfig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), paper_bgcolor=card, plot_bgcolor=card)
-        st.plotly_chart(qfig, use_container_width=True)
 
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
@@ -1034,3 +978,65 @@ with st.expander("Transaction History", expanded=False):
             st.dataframe(tx_display, use_container_width=True)
     else:
         st.write("No transactions yet.")
+
+if trace_for_monitor:
+    total_entries = max(len(trace_for_monitor), 1)
+    guardrail_hits = 0
+    veto_hits = 0
+    high_vol_hits = 0
+    low_conf_hold_hits = 0
+    for row in trace_for_monitor:
+        reasons = [str(r) for r in (row.get("decision_reasons", []) or [])]
+        decision = str(row.get("decision", "HOLD")).upper()
+        if any(r.startswith("guardrail:") for r in reasons):
+            guardrail_hits += 1
+        if any(r.startswith("veto:") for r in reasons):
+            veto_hits += 1
+        if "volatility:high" in reasons:
+            high_vol_hits += 1
+        if decision == "HOLD" and any(r.startswith("confidence:") for r in reasons):
+            low_conf_hold_hits += 1
+
+    st.subheader("Risk Monitor")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Guardrail Hit Rate", f"{100 * guardrail_hits / total_entries:.1f}%")
+    r2.metric("Veto Rate", f"{100 * veto_hits / total_entries:.1f}%")
+    r3.metric("High Volatility Rate", f"{100 * high_vol_hits / total_entries:.1f}%")
+    r4.metric("Low-Conf HOLD Rate", f"{100 * low_conf_hold_hits / total_entries:.1f}%")
+    st.caption(
+        "Guardrail Hit Rate: how often safety filters flagged a ticker (data/liquidity/quality issues). "
+        "Veto Rate: how often a hard rule blocked a trade even when score looked tradable. "
+        "High Volatility Rate: share of signals generated in unstable price conditions. "
+        "Low-Conf HOLD Rate: how often the engine stayed in HOLD because confidence was too weak."
+    )
+
+    quality_rows = []
+    for row in trace_for_monitor[-120:]:
+        signals_payload = row.get("signals", {}) or {}
+        total = 0
+        ok = 0
+        for payload in signals_payload.values():
+            if not isinstance(payload, dict):
+                continue
+            total += 1
+            if bool(payload.get("quality_ok", False)):
+                ok += 1
+        ratio = (ok / total) if total > 0 else 0.0
+        quality_rows.append(
+            {
+                "ts": str(row.get("ts", "")),
+                "quality_ratio": ratio,
+                "confidence": float(row.get("confidence", 0.0)),
+            }
+        )
+    if quality_rows:
+        qdf = pd.DataFrame(quality_rows)
+        qfig = px.line(
+            qdf,
+            x="ts",
+            y=["quality_ratio", "confidence"],
+            title="Signal Quality & Confidence Trend",
+            template=plot_template,
+        )
+        qfig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), paper_bgcolor=card, plot_bgcolor=card)
+        st.plotly_chart(qfig, use_container_width=True)
