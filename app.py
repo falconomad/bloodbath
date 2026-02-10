@@ -541,16 +541,36 @@ if not portfolio.empty:
 
     g1, g2 = st.columns([2, 1])
     with g1:
-        growth_fig = px.area(
-            portfolio,
-            x="time",
-            y="value",
-            title="Portfolio Growth",
-            template=plot_template,
-        )
-        growth_fig.update_traces(line_color=accent, fillcolor=accent_soft)
-        growth_fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)
-        st.plotly_chart(growth_fig, use_container_width=True)
+        if not positions.empty and {"ticker", "market_value"}.issubset(set(positions.columns)):
+            alloc_view_top = positions.sort_values("market_value", ascending=False).copy()
+            pull = [0.06 if i < 2 else 0.0 for i in range(len(alloc_view_top))]
+            alloc_top_fig = px.pie(
+                alloc_view_top,
+                names="ticker",
+                values="market_value",
+                hole=0.62,
+                title="Current Allocation Mix",
+                template=plot_template,
+                color_discrete_sequence=pie_palette,
+            )
+            alloc_top_fig.update_traces(
+                pull=pull,
+                sort=False,
+                textposition="inside",
+                texttemplate="%{percent}",
+                marker=dict(line=dict(color=card, width=2)),
+                hovertemplate="<b>%{label}</b><br>Value: $%{value:,.2f}<br>Weight: %{percent}<extra></extra>",
+            )
+            alloc_top_fig.update_layout(
+                height=340,
+                margin=dict(l=10, r=10, t=50, b=10),
+                paper_bgcolor=card,
+                showlegend=True,
+                legend=dict(orientation="v", y=0.95),
+            )
+            st.plotly_chart(alloc_top_fig, use_container_width=True)
+        else:
+            st.info("No allocation snapshot available yet.")
     with g2:
         dd_df = portfolio[["time"]].copy()
         dd_df["drawdown_pct"] = drawdown_series.fillna(0) * 100
@@ -599,125 +619,6 @@ if not signals.empty:
         st.plotly_chart(sig_fig, use_container_width=True)
 else:
     st.caption("No latest signal data yet.")
-
-st.subheader("Current Allocation")
-
-if not positions.empty:
-    positions = positions.copy()
-    positions["allocation_pct"] = positions["allocation"] * 100
-    positions["pnl_pct_display"] = positions["pnl_pct"] * 100
-
-    viz_col1, viz_col2 = st.columns([1, 1])
-
-    with viz_col1:
-        alloc_view = positions.sort_values("market_value", ascending=False).copy()
-        pull = [0.06 if i < 2 else 0.0 for i in range(len(alloc_view))]
-        alloc_fig = px.pie(
-            alloc_view,
-            names="ticker",
-            values="market_value",
-            hole=0.62,
-            title="Allocation Mix",
-            template=plot_template,
-            color_discrete_sequence=pie_palette,
-        )
-        alloc_fig.update_traces(
-            pull=pull,
-            sort=False,
-            textposition="inside",
-            texttemplate="%{percent}",
-            marker=dict(line=dict(color=card, width=2)),
-            hovertemplate="<b>%{label}</b><br>Value: $%{value:,.2f}<br>Weight: %{percent}<extra></extra>",
-        )
-        alloc_fig.update_layout(
-            height=360,
-            margin=dict(l=10, r=10, t=50, b=20),
-            paper_bgcolor=card,
-            showlegend=True,
-            legend=dict(orientation="v", y=0.95),
-            annotations=[
-                dict(
-                    text=f"<b>${alloc_view['market_value'].sum():,.0f}</b><br><span style='font-size:11px'>invested • {len(alloc_view)} positions</span>",
-                    x=0.5,
-                    y=0.5,
-                    showarrow=False,
-                    font=dict(color=text, size=13),
-                )
-            ],
-        )
-        st.plotly_chart(alloc_fig, use_container_width=True)
-
-    with viz_col2:
-        pnl_view = positions.sort_values("pnl_pct_display", ascending=False).copy()
-        max_abs_pnl = float(pnl_view["pnl_pct_display"].abs().max()) if not pnl_view.empty else 0.0
-        pnl_view["bar_color"] = pnl_view["pnl_pct_display"].apply(lambda v: _signed_bar_hex(v, max_abs_pnl))
-        pnl_fig = px.bar(
-            pnl_view,
-            x="ticker",
-            y="pnl_pct_display",
-            color="ticker",
-            title="Position P/L %",
-            template=plot_template,
-            color_discrete_map={row["ticker"]: row["bar_color"] for _, row in pnl_view.iterrows()},
-        )
-        pnl_fig.update_traces(
-            marker_line_width=0,
-            hovertemplate="<b>%{x}</b><br>P/L: %{y:.2f}%<extra></extra>",
-        )
-        pnl_fig.update_layout(
-            height=360,
-            coloraxis_showscale=False,
-            margin=dict(l=10, r=10, t=50, b=20),
-            paper_bgcolor=card,
-            plot_bgcolor=card,
-            bargap=0.35,
-            xaxis=dict(title="", showgrid=False, tickfont=dict(size=12)),
-            yaxis=dict(
-                title="",
-                ticksuffix="%",
-                gridcolor=border,
-                zeroline=True,
-                zerolinecolor=text,
-                zerolinewidth=1.5,
-            ),
-        )
-        st.plotly_chart(pnl_fig, use_container_width=True)
-
-    clean_table = positions[
-        [
-            "ticker",
-            "shares",
-            "avg_cost",
-            "current_price",
-            "market_value",
-            "allocation_pct",
-            "pnl",
-            "pnl_pct_display",
-        ]
-    ].rename(
-        columns={
-            "avg_cost": "avg_cost($)",
-            "current_price": "price($)",
-            "market_value": "market_value($)",
-            "allocation_pct": "allocation(%)",
-            "pnl": "pnl($)",
-            "pnl_pct_display": "pnl(%)",
-        }
-    )
-
-    styled_positions = clean_table.style.format(
-        {
-            "avg_cost($)": "{:.2f}",
-            "price($)": "{:.2f}",
-            "market_value($)": "{:.2f}",
-            "allocation(%)": "{:.2f}",
-            "pnl($)": "{:.2f}",
-            "pnl(%)": "{:.2f}",
-        }
-    ).map(_color_signed, subset=["pnl($)", "pnl(%)"])
-    st.dataframe(styled_positions, use_container_width=True)
-else:
-    st.info("No open positions snapshot available yet.")
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
