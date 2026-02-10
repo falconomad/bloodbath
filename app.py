@@ -413,6 +413,13 @@ def _load_latest_experiment_result():
     root = Path("artifacts/experiments")
     if not root.exists():
         return None
+    json_files = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not json_files:
+        return None
+    try:
+        return json.loads(json_files[0].read_text(encoding="utf-8")), json_files[0]
+    except Exception:
+        return None
 
 
 def _with_logo_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -421,13 +428,59 @@ def _with_logo_column(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["logo"] = out["ticker"].astype(str).map(get_logo_url)
     return out
-    json_files = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not json_files:
-        return None
+
+
+def _signal_word(name: str, payload: dict) -> str:
+    if not isinstance(payload, dict) or not bool(payload.get("quality_ok", False)):
+        return "NA"
     try:
-        return json.loads(json_files[0].read_text(encoding="utf-8")), json_files[0]
+        v = float(payload.get("value", 0.0))
     except Exception:
-        return None
+        return "NA"
+    n = str(name).lower().strip()
+    if n == "trend":
+        return "Bull" if v > 0.2 else ("Bear" if v < -0.2 else "Flat")
+    if n in {"sentiment", "social", "market"}:
+        return "Pos" if v > 0.15 else ("Neg" if v < -0.15 else "Mix")
+    if n == "events":
+        return "Risk" if v < -0.2 else ("Boost" if v > 0.2 else "Calm")
+    if n == "micro":
+        return "Strong" if v > 0.15 else ("Weak" if v < -0.15 else "Norm")
+    if n == "dip":
+        return "Dip" if v > 0.1 else "None"
+    if n == "volatility":
+        return "High" if v < -0.25 else ("Med" if v < -0.1 else "Low")
+    return "NA"
+
+
+def _short_reason(reasons) -> str:
+    if not reasons:
+        return "-"
+    first = str((reasons or ["-"])[0])
+    first = first.replace("guardrail:", "").replace("veto:", "").replace("stability:", "")
+    first = first.replace("confidence:", "").replace("volatility:", "").replace("portfolio_risk:", "")
+    return first[:24] if first else "-"
+
+
+def _build_trace_lookup(trace_rows):
+    lookup = {}
+    for row in reversed(trace_rows or []):
+        ticker = str(row.get("ticker", "")).upper().strip()
+        if not ticker or ticker in lookup:
+            continue
+        signals_payload = row.get("signals", {}) or {}
+        lookup[ticker] = {
+            "trend": _signal_word("trend", signals_payload.get("trend", {})),
+            "sent": _signal_word("sentiment", signals_payload.get("sentiment", {})),
+            "events": _signal_word("events", signals_payload.get("events", {})),
+            "social": _signal_word("social", signals_payload.get("social", {})),
+            "mkt": _signal_word("market", signals_payload.get("market", {})),
+            "micro": _signal_word("micro", signals_payload.get("micro", {})),
+            "dip": _signal_word("dip", signals_payload.get("dip", {})),
+            "vol": _signal_word("volatility", signals_payload.get("volatility", {})),
+            "why": _short_reason(row.get("decision_reasons", [])),
+        }
+    return lookup
 
 
 def _us_market_status(now_et: datetime | None = None) -> tuple[str, str]:
@@ -578,6 +631,7 @@ m2.caption(market_note)
 
 # Risk Monitor (from trace)
 trace_for_monitor = load_jsonl_dict_rows("logs/recommendation_trace.jsonl")
+trace_lookup = _build_trace_lookup(trace_for_monitor)
 if trace_for_monitor:
     total_entries = max(len(trace_for_monitor), 1)
     guardrail_hits = 0
@@ -730,7 +784,33 @@ if not signals.empty:
         signal_view["decision"] = signal_view["decision"].astype(str).str.upper()
     signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
     signal_view = _with_logo_column(signal_view)
-    signal_cols = [col for col in ["logo", "ticker", "decision", "score", "price", "distance_to_trigger", "time"] if col in signal_view.columns]
+    if "ticker" in signal_view.columns:
+        for col in ["trend", "sent", "events", "social", "mkt", "micro", "dip", "vol", "why"]:
+            signal_view[col] = signal_view["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get(col, "NA" if col != "why" else "-")
+            )
+    signal_cols = [
+        col
+        for col in [
+            "logo",
+            "ticker",
+            "decision",
+            "score",
+            "why",
+            "trend",
+            "sent",
+            "events",
+            "social",
+            "mkt",
+            "micro",
+            "dip",
+            "vol",
+            "price",
+            "distance_to_trigger",
+            "time",
+        ]
+        if col in signal_view.columns
+    ]
     signal_table = signal_view[signal_cols].sort_values(["distance_to_trigger", "score"], ascending=[True, False]).head(20)
     s1, s2 = st.columns([2, 1])
     with s1:
@@ -780,6 +860,25 @@ with st.expander("Transaction History", expanded=False):
             tx_display["price"] = tx_display["price"].map(lambda v: f"{float(v):.2f}")
         if "value" in tx_display.columns:
             tx_display["value"] = tx_display["value"].map(lambda v: f"{float(v):.2f}")
+        if "ticker" in tx_display.columns:
+            tx_display["why"] = tx_display["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get("why", "-")
+            )
+            tx_display["trend"] = tx_display["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get("trend", "NA")
+            )
+            tx_display["sent"] = tx_display["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get("sent", "NA")
+            )
+            tx_display["events"] = tx_display["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get("events", "NA")
+            )
+            tx_display["social"] = tx_display["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get("social", "NA")
+            )
+            tx_display["mkt"] = tx_display["ticker"].astype(str).str.upper().map(
+                lambda t: (trace_lookup.get(t, {}) or {}).get("mkt", "NA")
+            )
         try:
             st.dataframe(
                 tx_display,
