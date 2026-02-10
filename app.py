@@ -483,6 +483,14 @@ def _build_trace_lookup(trace_rows):
     return lookup
 
 
+def _style_decision_cols(df: pd.DataFrame, cols: list[str]):
+    styler = df.style
+    for col in cols:
+        if col in df.columns:
+            styler = styler.map(_color_decision, subset=[col])
+    return styler
+
+
 def _us_market_status(now_et: datetime | None = None) -> tuple[str, str]:
     current = now_et or datetime.now(ZoneInfo("America/New_York"))
     weekday = current.weekday()
@@ -823,7 +831,7 @@ if not signals.empty:
             signal_display["distance_to_trigger"] = signal_display["distance_to_trigger"].map(lambda v: f"{float(v):.3f}")
         try:
             st.dataframe(
-                signal_display,
+                _style_decision_cols(signal_display, ["decision"]),
                 use_container_width=True,
                 hide_index=True,
                 column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
@@ -881,7 +889,7 @@ with st.expander("Transaction History", expanded=False):
             )
         try:
             st.dataframe(
-                tx_display,
+                _style_decision_cols(tx_display, ["action"]),
                 use_container_width=True,
                 column_config={"logo": st.column_config.ImageColumn("logo", width="small")},
             )
