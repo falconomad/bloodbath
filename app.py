@@ -426,16 +426,12 @@ skeleton_placeholder.empty()
 with st.sidebar:
     st.subheader("At-a-Glance")
     auto_refresh = st.toggle("Auto-refresh", value=True, help="Poll database periodically for new worker updates.")
-    refresh_seconds = st.slider("Refresh every (seconds)", min_value=30, max_value=300, value=120, step=30)
+    refresh_seconds = st.slider("Refresh every (seconds)", min_value=5, max_value=300, value=10, step=5)
     if auto_refresh:
         if st_autorefresh is not None:
             st_autorefresh(interval=int(refresh_seconds * 1000), key="dashboard_autorefresh")
         else:
-            st.markdown(
-                f'<meta http-equiv="refresh" content="{int(refresh_seconds)}">',
-                unsafe_allow_html=True,
-            )
-            st.caption("Using browser refresh fallback (optional `streamlit-autorefresh` not installed).")
+            st.warning("`streamlit-autorefresh` is not installed; auto-refresh is disabled.")
 
     st.markdown("**Current Allocation**")
     if not positions.empty:
