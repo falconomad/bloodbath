@@ -17,7 +17,7 @@ try:
 except Exception:  # pragma: no cover
     st_autorefresh = None
 
-st.set_page_config(page_title="Bloodbath", page_icon="🩸", layout="wide")
+st.set_page_config(page_title="KAI", page_icon="🤖", layout="wide")
 
 logo_path = Path("assets/bloodbath_logo.svg")
 logo_uri = ""
@@ -125,7 +125,7 @@ st.markdown(
         background-position: center;
       }}
       [data-testid="stHeader"]::after {{
-        content: "Bloodbath";
+        content: "KAI";
         position: absolute;
         left: max(calc((100vw - 1200px) / 2 + 4.1rem), 4.1rem);
         top: 50%;
