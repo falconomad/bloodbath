@@ -137,10 +137,10 @@ print("GitHub Actions worker starting one execution cycle...")
 def build_run_key(now=None):
     """Create a stable run key to avoid duplicate trades from cron retries.
 
-    We use 30-minute buckets because the workflow is typically scheduled every 30 minutes.
+    We use 10-minute buckets to match the current workflow schedule cadence.
     """
     current = now or datetime.now(ZoneInfo("Europe/Paris"))
-    bucket_minute = (current.minute // 30) * 30
+    bucket_minute = (current.minute // 10) * 10
     return f"{current.strftime('%Y-%m-%d')}-{current.hour:02d}-{bucket_minute:02d}"
 
 
