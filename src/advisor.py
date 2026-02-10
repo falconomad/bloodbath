@@ -406,7 +406,7 @@ def run_sp500_cycle(decision, data):
     return sp500_manager.get_history_df(), sp500_manager.get_transactions_df()
 
 
-from src.core.sp500_list import TOP20, get_sp500_universe
+from src.core.sp500_list import TOP20, TOP20_SECTOR, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
 from src.settings import (
     TOP20_STARTING_CAPITAL,
@@ -542,6 +542,7 @@ def run_top20_cycle_with_signals():
                 "decision": decision,
                 "score": round(final_score, 4),
                 "price": price,
+                "sector": TOP20_SECTOR.get(ticker, "UNKNOWN"),
                 "sentiment": float(rec.get("sentiment", 0.0)),
                 "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
                 "atr_pct": round(_atr_percent(data, period=14), 5),
@@ -567,6 +568,7 @@ def run_top20_cycle_with_signals():
                 "decision": "HOLD",
                 "score": 0.0,
                 "price": price,
+                "sector": TOP20_SECTOR.get(ticker, "UNKNOWN"),
                 "sentiment": 0.0,
                 "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
                 "atr_pct": round(_atr_percent(data, period=14), 5),

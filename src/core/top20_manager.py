@@ -22,6 +22,9 @@ class Top20AutoManager:
         buy_confirm_steps=1,
         max_entry_growth_20d=0.18,
         initial_entry_ratio=1.0,
+        max_sector_allocation=0.45,
+        max_buy_exposure_per_sector_step=0.30,
+        max_positions_per_sector=2,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
@@ -39,6 +42,9 @@ class Top20AutoManager:
         self.buy_confirm_steps = int(buy_confirm_steps)
         self.max_entry_growth_20d = float(max_entry_growth_20d)
         self.initial_entry_ratio = float(initial_entry_ratio)
+        self.max_sector_allocation = float(max_sector_allocation)
+        self.max_buy_exposure_per_sector_step = float(max_buy_exposure_per_sector_step)
+        self.max_positions_per_sector = int(max_positions_per_sector)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
@@ -73,7 +79,7 @@ class Top20AutoManager:
         growth_factor = max(0.7, min(1.5, 1.0 + (0.80 * growth)))
         return max(score * sentiment_factor * growth_factor, 1e-6)
 
-    def _buy(self, timestamp, ticker, price, budget):
+    def _buy(self, timestamp, ticker, price, budget, sector=None):
         if not self._is_valid_price(price) or budget <= 0 or self.cash <= 0:
             return 0.0
 
@@ -102,9 +108,32 @@ class Top20AutoManager:
             "shares": new_shares,
             "avg_cost": new_avg_cost,
             "peak_price": new_peak,
+            "sector": str(sector or position.get("sector", "UNKNOWN")),
         }
         self._record(timestamp, ticker, "BUY", shares, exec_price)
         return total_cost
+
+    def _sector(self, ticker, analysis_by_ticker):
+        if ticker in self.holdings:
+            existing = str(self.holdings[ticker].get("sector", "")).strip()
+            if existing:
+                return existing
+        rec = analysis_by_ticker.get(ticker, {})
+        return str(rec.get("sector", "UNKNOWN")).strip() or "UNKNOWN"
+
+    def _sector_market_value(self, sector_name, analysis_by_ticker):
+        total = 0.0
+        for ticker, position in self.holdings.items():
+            if self._sector(ticker, analysis_by_ticker) != sector_name:
+                continue
+            price = float(self.last_price_by_ticker.get(ticker, position.get("avg_cost", 0.0)))
+            if not self._is_valid_price(price):
+                continue
+            total += float(position["shares"]) * price
+        return total
+
+    def _sector_position_count(self, sector_name, analysis_by_ticker):
+        return sum(1 for ticker in self.holdings if self._sector(ticker, analysis_by_ticker) == sector_name)
 
     def _sell_all(self, timestamp, ticker, price):
         if not self._is_valid_price(price):
@@ -303,6 +332,12 @@ class Top20AutoManager:
 
         open_slots = max(self.max_positions - len(self.holdings), 0)
         new_candidates = [c for c in buy_candidates if c["ticker"] not in self.holdings][:open_slots]
+        new_candidates = [
+            c
+            for c in new_candidates
+            if self._sector_position_count(self._sector(c["ticker"], analysis_by_ticker), analysis_by_ticker)
+            < self.max_positions_per_sector
+        ]
 
         if self.cash > 0:
             equity = self._portfolio_value()
@@ -313,17 +348,37 @@ class Top20AutoManager:
                 weights = [self._buy_weight(c) for c in new_candidates]
                 total_weight = sum(weights) if weights else 0.0
                 planned_new_budget = exposure_budget_remaining * self.initial_entry_ratio
+                sector_new_counts = {}
                 for candidate, weight in zip(new_candidates, weights):
                     if exposure_budget_remaining <= 0:
                         break
+                    sector = self._sector(candidate["ticker"], analysis_by_ticker)
+                    current_sector_positions = self._sector_position_count(sector, analysis_by_ticker)
+                    new_sector_positions = sector_new_counts.get(sector, 0)
+                    if (current_sector_positions + new_sector_positions) >= self.max_positions_per_sector:
+                        continue
+                    sector_current_value = self._sector_market_value(sector, analysis_by_ticker)
+                    sector_cap_equity = equity * self.max_sector_allocation
+                    sector_cap_step = equity * self.max_buy_exposure_per_sector_step
+                    sector_room = max(min(sector_cap_equity - sector_current_value, sector_cap_step), 0.0)
+                    if sector_room <= 0:
+                        continue
                     target_budget = (
                         planned_new_budget * (weight / total_weight)
                         if total_weight > 0
                         else planned_new_budget / max(len(new_candidates), 1)
                     )
-                    budget = min(target_budget, cap_per_position, self.cash, exposure_budget_remaining)
-                    spent = self._buy(timestamp, ticker=candidate["ticker"], price=float(candidate["price"]), budget=budget)
+                    budget = min(target_budget, cap_per_position, self.cash, exposure_budget_remaining, sector_room)
+                    spent = self._buy(
+                        timestamp,
+                        ticker=candidate["ticker"],
+                        price=float(candidate["price"]),
+                        budget=budget,
+                        sector=sector,
+                    )
                     exposure_budget_remaining -= spent
+                    if spent > 0:
+                        sector_new_counts[sector] = sector_new_counts.get(sector, 0) + 1
 
             # 3) Opportunistic averaging-up for strong signals if under-allocated.
             for candidate in buy_candidates:
@@ -344,8 +399,15 @@ class Top20AutoManager:
                 room = max(cap_per_position - market_value, 0.0)
                 if room <= 0:
                     continue
+                sector = self._sector(ticker, analysis_by_ticker)
+                sector_current_value = self._sector_market_value(sector, analysis_by_ticker)
+                sector_cap_equity = equity * self.max_sector_allocation
+                sector_room = max(sector_cap_equity - sector_current_value, 0.0)
+                if sector_room <= 0:
+                    continue
                 budget = min(room, self.cash * 0.35, exposure_budget_remaining)
-                spent = self._buy(timestamp, ticker=ticker, price=price, budget=budget)
+                budget = min(budget, sector_room)
+                spent = self._buy(timestamp, ticker=ticker, price=price, budget=budget, sector=sector)
                 exposure_budget_remaining -= spent
 
         self.history.append(self._portfolio_value())

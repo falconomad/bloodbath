@@ -24,6 +24,29 @@ TOP20 = [
     "PEP",
 ]
 
+TOP20_SECTOR = {
+    "AAPL": "Information Technology",
+    "MSFT": "Information Technology",
+    "NVDA": "Information Technology",
+    "AMZN": "Consumer Discretionary",
+    "GOOGL": "Communication Services",
+    "META": "Communication Services",
+    "BRK-B": "Financials",
+    "TSLA": "Consumer Discretionary",
+    "UNH": "Health Care",
+    "XOM": "Energy",
+    "JNJ": "Health Care",
+    "JPM": "Financials",
+    "V": "Financials",
+    "PG": "Consumer Staples",
+    "MA": "Financials",
+    "HD": "Consumer Discretionary",
+    "CVX": "Energy",
+    "ABBV": "Health Care",
+    "MRK": "Health Care",
+    "PEP": "Consumer Staples",
+}
+
 
 def _normalize_ticker(symbol):
     """Normalize S&P 500 symbols to yfinance-compatible ticker format."""

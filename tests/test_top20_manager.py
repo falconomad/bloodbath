@@ -280,6 +280,47 @@ class Top20ManagerTests(unittest.TestCase):
         manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0, "growth_20d": 0.25}])
         self.assertNotIn("AAA", manager.holdings)
 
+    def test_limits_positions_per_sector(self):
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=4,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=1,
+            max_positions_per_sector=1,
+        )
+        manager.step(
+            [
+                {"ticker": "AAA", "decision": "BUY", "score": 2.2, "price": 100.0, "sector": "Tech"},
+                {"ticker": "BBB", "decision": "BUY", "score": 2.1, "price": 100.0, "sector": "Tech"},
+                {"ticker": "CCC", "decision": "BUY", "score": 2.0, "price": 100.0, "sector": "Energy"},
+            ]
+        )
+        sectors = [manager.holdings[t].get("sector") for t in manager.holdings]
+        self.assertLessEqual(sectors.count("Tech"), 1)
+
+    def test_limits_sector_allocation(self):
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=3,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=1,
+            max_sector_allocation=0.25,
+            max_buy_exposure_per_sector_step=0.25,
+        )
+        manager.step(
+            [
+                {"ticker": "AAA", "decision": "BUY", "score": 3.0, "price": 100.0, "sector": "Tech"},
+                {"ticker": "BBB", "decision": "BUY", "score": 2.8, "price": 100.0, "sector": "Tech"},
+                {"ticker": "CCC", "decision": "BUY", "score": 2.0, "price": 100.0, "sector": "Energy"},
+            ]
+        )
+        tech_value = sum(
+            manager.holdings[t]["shares"] * manager.last_price_by_ticker[t]
+            for t in manager.holdings
+            if manager.holdings[t].get("sector") == "Tech"
+        )
+        self.assertLessEqual(tech_value, 250.0 + 1e-6)
+
 
 if __name__ == "__main__":
     unittest.main()
