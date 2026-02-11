@@ -96,6 +96,7 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
           ALPACA_DATA_BASE_URL: ${{ vars.ALPACA_DATA_BASE_URL }}
+          STARTING_CAPITAL: ${{ vars.STARTING_CAPITAL }}
           TRADE_MODE: ${{ vars.TRADE_MODE }}
           SIGNAL_BUY_THRESHOLD: ${{ vars.SIGNAL_BUY_THRESHOLD }}
           SIGNAL_SELL_THRESHOLD: ${{ vars.SIGNAL_SELL_THRESHOLD }}

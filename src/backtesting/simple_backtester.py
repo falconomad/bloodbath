@@ -5,6 +5,7 @@ import copy
 import json
 import math
 import random
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any
 
@@ -160,6 +161,33 @@ def _max_drawdown_from_pnl(pnl: list[float]) -> float:
     return max_dd
 
 
+def _parse_ts(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        # Accept ISO timestamps with trailing Z.
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _years_span(examples: list[BacktestExample]) -> float:
+    if len(examples) < 2:
+        return 0.0
+    ts_values = [_parse_ts(ex.ts) for ex in examples]
+    ts_values = [ts for ts in ts_values if ts is not None]
+    if len(ts_values) < 2:
+        # Fallback for synthetic data/tests with no parseable timestamps.
+        return max(len(examples) / 252.0, 0.0)
+    start = min(ts_values)
+    end = max(ts_values)
+    seconds = (end - start).total_seconds()
+    if seconds <= 0:
+        return max(len(examples) / 252.0, 0.0)
+    return seconds / (365.25 * 24 * 3600)
+
+
 def evaluate_candidate(
     examples: list[BacktestExample],
     cfg: dict[str, Any],
@@ -218,6 +246,9 @@ def evaluate_candidate(
             "sharpe_ratio": 0.0,
             "sortino_ratio": 0.0,
             "max_drawdown": 0.0,
+            "profit_factor": 0.0,
+            "cagr": 0.0,
+            "calmar_ratio": 0.0,
             "expectancy_per_trade": 0.0,
             "turnover": 0.0,
         }
@@ -234,10 +265,19 @@ def evaluate_candidate(
     max_drawdown = _max_drawdown_from_pnl(pnl)
     wins_list = [x for x in trade_pnl if x > 0]
     losses_list = [x for x in trade_pnl if x < 0]
+    gross_profit = sum(wins_list)
+    gross_loss_abs = abs(sum(losses_list))
     avg_win = (sum(wins_list) / len(wins_list)) if wins_list else 0.0
     avg_loss = (sum(losses_list) / len(losses_list)) if losses_list else 0.0
     win_rate = (wins / trades) if trades > 0 else 0.0
     expectancy = (win_rate * avg_win) + ((1.0 - win_rate) * avg_loss)
+    profit_factor = (gross_profit / gross_loss_abs) if gross_loss_abs > 1e-12 else (999.0 if gross_profit > 0 else 0.0)
+    equity = 1.0
+    for r in pnl:
+        equity *= (1.0 + float(r))
+    years = _years_span(examples)
+    cagr = ((equity ** (1.0 / years)) - 1.0) if years > 1e-9 and equity > 0 else 0.0
+    calmar = (cagr / max_drawdown) if max_drawdown > 1e-9 else 0.0
     growth_cfg = local_cfg.get("growth", {}) or {}
     ret_w = float(growth_cfg.get("objective_total_return_weight", 1.0))
     exp_w = float(growth_cfg.get("objective_expectancy_weight", 0.6))
@@ -263,6 +303,9 @@ def evaluate_candidate(
         "sharpe_ratio": sharpe,
         "sortino_ratio": sortino,
         "max_drawdown": max_drawdown,
+        "profit_factor": profit_factor,
+        "cagr": cagr,
+        "calmar_ratio": calmar,
         "expectancy_per_trade": expectancy,
         "turnover": turnover,
         "execution_cost_rate": _cost_rate(model),

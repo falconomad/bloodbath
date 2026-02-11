@@ -154,7 +154,7 @@ from src.core.sp500_list import TOP20_SECTOR, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
 from src.settings import (
     ENABLE_POSITION_ROTATION,
-    TOP20_STARTING_CAPITAL,
+    STARTING_CAPITAL,
     TOP20_MIN_BUY_SCORE,
     TRADE_MODE,
     FETCH_BATCH_SIZE,
@@ -169,7 +169,7 @@ print(
 )
 
 top20_manager = Top20AutoManager(
-    starting_capital=TOP20_STARTING_CAPITAL,
+    starting_capital=STARTING_CAPITAL,
     min_buy_score=TOP20_MIN_BUY_SCORE,
     slippage_bps=TOP20_SLIPPAGE_BPS,
     fee_bps=TOP20_FEE_BPS,

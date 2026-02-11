@@ -1,0 +1,41 @@
+name: Fresh Start
+
+on:
+  workflow_dispatch:
+    inputs:
+      starting_capital:
+        description: "Starting capital in USD (example: 5000)"
+        required: true
+        default: "5000"
+
+jobs:
+  fresh-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      STARTING_CAPITAL: ${{ github.event.inputs.starting_capital }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: worker/requirements-worker.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --disable-pip-version-check --no-input -r worker/requirements-worker.txt
+
+      - name: Execute fresh start
+        run: |
+          python scripts/fresh_start.py "${STARTING_CAPITAL}" --skip-env-update
+
+      - name: Summary
+        run: |
+          echo "Fresh start completed with STARTING_CAPITAL=${STARTING_CAPITAL}"

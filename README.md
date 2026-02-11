@@ -26,3 +26,8 @@ Setup:
    - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
 7. `pip install -r requirements.txt`
 8. `streamlit run app.py`
+
+Fresh Start (Reset State + Set Capital):
+
+- `./.venv/bin/python scripts/fresh_start.py 5000`
+- This resets persisted trading state tables, seeds the portfolio to the provided amount, and updates `.env` with `STARTING_CAPITAL`.

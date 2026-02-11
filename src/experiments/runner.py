@@ -68,6 +68,17 @@ def run_experiment(
     examples = build_examples(entries, horizon=horizon)
     if not examples:
         return {"status": "no_data", "examples": 0}
+    oos_cfg = experiment_config.get("out_of_sample", {}) or {}
+    oos_enabled = bool(oos_cfg.get("enabled", True))
+    oos_ratio = float(oos_cfg.get("ratio", 0.2))
+    oos_ratio = min(max(oos_ratio, 0.0), 0.5)
+    oos_cut = int(len(examples) * (1.0 - oos_ratio)) if oos_enabled else len(examples)
+    if oos_enabled and oos_cut > 1 and oos_cut < len(examples):
+        dev_examples = examples[:oos_cut]
+        oos_examples = examples[oos_cut:]
+    else:
+        dev_examples = examples
+        oos_examples = []
 
     variants = list(experiment_config.get("variants", []))
     if not variants:
@@ -93,15 +104,15 @@ def run_experiment(
     use_walk_forward = bool(split_cfg.get("enabled", True))
     if use_walk_forward:
         splits = build_walk_forward_splits(
-            n=len(examples),
+            n=len(dev_examples),
             windows=int(split_cfg.get("windows", 4)),
             train_ratio=float(split_cfg.get("train_ratio", 0.7)),
         )
         if not splits:
-            splits = [((0, int(len(examples) * 0.7)), (int(len(examples) * 0.7), len(examples)))]
+            splits = [((0, int(len(dev_examples) * 0.7)), (int(len(dev_examples) * 0.7), len(dev_examples)))]
     else:
-        cut = max(int(len(examples) * 0.7), 1)
-        splits = [((0, cut), (cut, len(examples)))]
+        cut = max(int(len(dev_examples) * 0.7), 1)
+        splits = [((0, cut), (cut, len(dev_examples)))]
 
     rows: list[dict[str, Any]] = []
     for variant in variants:
@@ -114,8 +125,8 @@ def run_experiment(
         test_scores = []
         variant_split_rows: list[dict[str, Any]] = []
         for idx, ((tr0, tr1), (te0, te1)) in enumerate(splits):
-            train_ex = examples[tr0:tr1]
-            test_ex = examples[te0:te1]
+            train_ex = dev_examples[tr0:tr1]
+            test_ex = dev_examples[te0:te1]
             if not train_ex or not test_ex:
                 continue
 
@@ -130,10 +141,13 @@ def run_experiment(
                 "test_objective": test_metrics.get("objective", 0.0),
                 "test_total_return": test_metrics.get("total_return", 0.0),
                 "test_win_rate": test_metrics.get("win_rate", 0.0),
+                "test_profit_factor": test_metrics.get("profit_factor", 0.0),
                 "test_trades": test_metrics.get("trades", 0.0),
                 "test_sharpe_ratio": test_metrics.get("sharpe_ratio", 0.0),
                 "test_sortino_ratio": test_metrics.get("sortino_ratio", 0.0),
                 "test_max_drawdown": test_metrics.get("max_drawdown", 0.0),
+                "test_cagr": test_metrics.get("cagr", 0.0),
+                "test_calmar_ratio": test_metrics.get("calmar_ratio", 0.0),
                 "test_expectancy_per_trade": test_metrics.get("expectancy_per_trade", 0.0),
             }
             variant_split_rows.append(split_row)
@@ -150,10 +164,13 @@ def run_experiment(
                 "test_objective": mean_test,
                 "test_total_return": sum(r["test_total_return"] for r in variant_split_rows) / denom,
                 "test_win_rate": sum(r["test_win_rate"] for r in variant_split_rows) / denom,
+                "test_profit_factor": sum(r["test_profit_factor"] for r in variant_split_rows) / denom,
                 "test_trades": sum(r["test_trades"] for r in variant_split_rows) / denom,
                 "test_sharpe_ratio": sum(r["test_sharpe_ratio"] for r in variant_split_rows) / denom,
                 "test_sortino_ratio": sum(r["test_sortino_ratio"] for r in variant_split_rows) / denom,
                 "test_max_drawdown": sum(r["test_max_drawdown"] for r in variant_split_rows) / denom,
+                "test_cagr": sum(r["test_cagr"] for r in variant_split_rows) / denom,
+                "test_calmar_ratio": sum(r["test_calmar_ratio"] for r in variant_split_rows) / denom,
                 "test_expectancy_per_trade": sum(r["test_expectancy_per_trade"] for r in variant_split_rows) / denom,
             }
         )
@@ -161,12 +178,27 @@ def run_experiment(
     aggregates = [r for r in rows if r["split"] == "aggregate"]
     aggregates.sort(key=lambda r: float(r.get("test_objective", -1e9)), reverse=True)
     best = aggregates[0] if aggregates else None
+    best_oos = None
+    if best is not None and oos_examples:
+        best_name = str(best.get("variant", "")).strip()
+        best_variant = next(
+            (v for v in variants if str(v.get("name", "")).strip() == best_name),
+            None,
+        )
+        if best_variant is not None:
+            variant_patch = {k: v for k, v in best_variant.items() if k != "name"}
+            variant_cfg = _deep_update(base_cfg, variant_patch)
+            variant_cfg["weights"] = _normalize_weights(variant_cfg.get("weights", {}))
+            best_oos = evaluate_candidate(oos_examples, variant_cfg, variant_cfg["weights"], execution_model=execution_model)
 
     result = {
         "status": "ok",
         "examples": len(examples),
+        "dev_examples": len(dev_examples),
+        "out_of_sample_examples": len(oos_examples),
         "variants": [v.get("name", "variant") for v in variants],
         "best_variant": best,
+        "best_variant_out_of_sample": best_oos,
         "rows": rows,
     }
 
@@ -186,10 +218,13 @@ def run_experiment(
                 "test_objective",
                 "test_total_return",
                 "test_win_rate",
+                "test_profit_factor",
                 "test_trades",
                 "test_sharpe_ratio",
                 "test_sortino_ratio",
                 "test_max_drawdown",
+                "test_cagr",
+                "test_calmar_ratio",
                 "test_expectancy_per_trade",
             ],
         )

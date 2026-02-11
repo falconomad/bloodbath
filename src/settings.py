@@ -44,7 +44,7 @@ def _trade_mode_from_env():
 
 
 TRADE_MODE = _trade_mode_from_env()
-TOP20_STARTING_CAPITAL = _float_from_env("TOP20_STARTING_CAPITAL", 2000)
+STARTING_CAPITAL = _float_from_env("STARTING_CAPITAL", _float_from_env("TOP20_STARTING_CAPITAL", 2000))
 
 # Signal thresholds for top20 cycle decisions.
 SIGNAL_BUY_THRESHOLD = _float_from_env("SIGNAL_BUY_THRESHOLD", 1.0 if TRADE_MODE == "NORMAL" else 0.55)

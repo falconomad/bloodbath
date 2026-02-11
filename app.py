@@ -10,7 +10,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
-from src.settings import TOP20_STARTING_CAPITAL
+from src.settings import STARTING_CAPITAL
 from src.common.trace_utils import load_jsonl_dict_rows
 from src.analytics.explainability_report import generate_explainability_report
 from src.ui.stock_logos import get_logo_url
@@ -794,7 +794,7 @@ trace_lookup = _build_trace_lookup(trace_for_monitor)
 
 if not portfolio.empty:
     latest = float(portfolio["value"].iloc[-1])
-    baseline_capital = float(TOP20_STARTING_CAPITAL)
+    baseline_capital = float(STARTING_CAPITAL)
     change_pct = ((latest - baseline_capital) / baseline_capital) * 100 if baseline_capital > 0 else 0.0
     running_peak = portfolio["value"].cummax()
     drawdown_series = (running_peak - portfolio["value"]) / running_peak.replace(0, pd.NA)
