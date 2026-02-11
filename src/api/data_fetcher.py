@@ -165,6 +165,7 @@ def _get_price_data_from_finnhub(ticker, period="6mo", interval="1d"):
         _finnhub_status_logged = True
 
     start, end = _finnhub_window_unix(period)
+    print(f"[call][finnhub][candles] ticker={ticker} period={period} interval={interval}")
     try:
         payload = client.stock_candles(ticker, resolution, start, end)
     except Exception as exc:
@@ -252,6 +253,7 @@ def _get_price_data_from_alpaca(ticker, period="6mo", interval="1d"):
     }
 
     try:
+        print(f"[call][alpaca][bars] ticker={ticker} period={period} interval={interval} feed=iex")
         response = requests.get(url, headers=headers, params=params, timeout=15)
         if response.status_code == 429:
             if not _alpaca_rate_limit_logged:
@@ -304,6 +306,7 @@ def get_alpaca_snapshot_features(ticker):
     params = {"feed": "iex"}
 
     try:
+        print(f"[call][alpaca][snapshot] ticker={ticker} feed=iex")
         response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         payload = response.json() if isinstance(response.json(), dict) else {}
@@ -399,6 +402,7 @@ def get_company_news(ticker, lookback_days=7, limit=10, structured=False):
     primary_news = []
     if not _finnhub_news_rate_limited:
         try:
+            print(f"[call][finnhub][company_news] ticker={ticker} lookback_days={lookback_days} limit={limit}")
             to_date = date.today()
             from_date = to_date - timedelta(days=lookback_days)
             news = client.company_news(
@@ -485,6 +489,7 @@ def _get_google_news_rss(ticker, limit=10):
         f"?q={query}&hl={quote_plus(GOOGLE_NEWS_RSS_LANG)}&gl={quote_plus(GOOGLE_NEWS_RSS_REGION)}&ceid={quote_plus(GOOGLE_NEWS_RSS_REGION)}:en"
     )
     try:
+        print(f"[call][google_rss][news] ticker={ticker} limit={limit}")
         response = requests.get(
             url,
             timeout=10,
@@ -540,6 +545,7 @@ def get_x_recent_tweets(ticker, limit=20):
     last_error = ""
     for url in ("https://api.x.com/2/tweets/search/recent", "https://api.twitter.com/2/tweets/search/recent"):
         try:
+            print(f"[call][x][recent_search] ticker={ticker} limit={capped} host={url.split('/')[2]}")
             response = requests.get(url, headers=headers, params=params, timeout=12)
             last_status = int(response.status_code)
             if response.status_code in {401, 403, 429}:
@@ -555,6 +561,7 @@ def get_x_recent_tweets(ticker, limit=20):
             if not _x_status_logged:
                 print("[data] X sentiment feed enabled")
                 _x_status_logged = True
+            print(f"[result][x][recent_search] ticker={ticker} status={last_status} rows={len(payload.get('data', []) or [])}")
             break
         except Exception as exc:
             last_error = str(exc)
@@ -591,6 +598,7 @@ def get_market_sentiment_news(limit=12):
     if cache_key in _market_news_cache:
         return _market_news_cache[cache_key]
     universe = ["SPY", "QQQ", "DIA"]
+    print(f"[call][market_news] symbols={','.join(universe)} limit={limit}")
     merged = []
     for sym in universe:
         rows = get_company_news(sym, lookback_days=3, limit=max(4, limit // len(universe)), structured=True)

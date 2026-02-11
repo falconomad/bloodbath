@@ -103,7 +103,10 @@ class GeminiGuard:
                 pass
         dynamic_cap = int(self._state.get("dynamic_daily_cap", self._base_daily_cap) or self._base_daily_cap)
         hard_cap = min(self.max_calls_per_day, dynamic_cap)
-        return int(self._state.get("calls_today", 0)) < hard_cap
+        allowed = int(self._state.get("calls_today", 0)) < hard_cap
+        if not allowed:
+            print(f"[call][gemini] blocked budget_exhausted calls_today={self._state.get('calls_today', 0)} cap={hard_cap}")
+        return allowed
 
     def _record_call(self) -> None:
         self._state["calls_today"] = int(self._state.get("calls_today", 0)) + 1
@@ -124,6 +127,10 @@ class GeminiGuard:
         self._state["cooldown_until"] = (now.replace(microsecond=0) + timedelta(minutes=20)).isoformat()
         self._state["last_rate_limit_ts"] = now.isoformat()
         self._save_state()
+        print(
+            "[result][gemini] rate_limited "
+            f"dynamic_daily_cap={self._state.get('dynamic_daily_cap')} cooldown_until={self._state.get('cooldown_until')}"
+        )
 
     def _prompt_for(self, row: dict[str, Any]) -> str:
         decision = str(row.get("decision", "HOLD")).upper()
@@ -279,6 +286,8 @@ class GeminiGuard:
             return []
         if not self.enabled() or not self._can_call():
             return None
+        tickers = ",".join([str(r.get("ticker", "")).upper() for r in rows if str(r.get("ticker", "")).strip()])
+        print(f"[call][gemini] model={self.model} batch={len(rows)} tickers={tickers}")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         body = {
             "contents": [{"parts": [{"text": self._prompt_for_many(rows)}]}],
@@ -292,6 +301,11 @@ class GeminiGuard:
         self._record_call()
         payload = resp.json() or {}
         self._record_tokens(self._usage_tokens(payload))
+        print(
+            "[result][gemini] success "
+            f"status={resp.status_code} calls_today={self._state.get('calls_today', 0)} "
+            f"tokens_today={self._state.get('tokens_today', 0)}"
+        )
         text = self._extract_text(payload)
         parsed = self._parse_json_result(text)
         if isinstance(parsed, dict):
@@ -310,9 +324,11 @@ class GeminiGuard:
         buys = [x for x in out if str(x.get("decision", "HOLD")).upper() == "BUY"]
         buys.sort(key=lambda r: float(r.get("score", 0.0)), reverse=True)
         pending: list[dict[str, Any]] = []
+        cache_hits = 0
         for row in buys:
             cached = self._cache_get(row)
             if cached:
+                cache_hits += 1
                 row["gemini_cached"] = True
                 row["gemini_action"] = str(cached.get("action", "ALLOW")).upper()
                 row["gemini_confidence"] = round(float(cached.get("confidence", 0.0) or 0.0), 4)
@@ -330,6 +346,12 @@ class GeminiGuard:
                 row["decision_reasons"] = reasons
             else:
                 pending.append(row)
+        if buys:
+            print(
+                "[cycle][gemini][plan] "
+                f"buys={len(buys)} pending={len(pending)} cache_hits={cache_hits} "
+                f"max_tickers_per_request={self.max_tickers_per_request}"
+            )
         # Free-tier optimization: keep request count tiny; pack multiple tickers per call.
         request_budget = min(self.max_calls_per_cycle, 1)
         idx = 0
