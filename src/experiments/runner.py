@@ -15,6 +15,10 @@ from src.backtesting.simple_backtester import (
     load_trace_entries,
     sample_weight_candidates,
 )
+from src.backtesting.portfolio_backtester import (
+    PortfolioBacktestConfig,
+    evaluate_candidate_portfolio,
+)
 from src.pipeline.decision_engine import load_config
 
 
@@ -93,11 +97,18 @@ def run_experiment(
         variants = variants + auto_variants
 
     exec_cfg = experiment_config.get("execution", {})
+    use_portfolio_backtester = bool(experiment_config.get("portfolio_backtester", {}).get("enabled", False))
     execution_model = ExecutionModel(
         fee_bps=float(exec_cfg.get("fee_bps", 1.0)),
         spread_bps=float(exec_cfg.get("spread_bps", 5.0)),
         slippage_bps=float(exec_cfg.get("slippage_bps", 3.0)),
         fill_ratio=float(exec_cfg.get("fill_ratio", 1.0)),
+    )
+    pbt_cfg_raw = experiment_config.get("portfolio_backtester", {}) or {}
+    pbt_cfg = PortfolioBacktestConfig(
+        starting_capital=float(pbt_cfg_raw.get("starting_capital", 1.0)),
+        max_positions=int(pbt_cfg_raw.get("max_positions", 8)),
+        max_position_size=float(pbt_cfg_raw.get("max_position_size", 0.2)),
     )
 
     split_cfg = experiment_config.get("walk_forward", {})
@@ -130,8 +141,12 @@ def run_experiment(
             if not train_ex or not test_ex:
                 continue
 
-            train_metrics = evaluate_candidate(train_ex, variant_cfg, variant_cfg["weights"], execution_model=execution_model)
-            test_metrics = evaluate_candidate(test_ex, variant_cfg, variant_cfg["weights"], execution_model=execution_model)
+            eval_fn = evaluate_candidate_portfolio if use_portfolio_backtester else evaluate_candidate
+            kwargs = {"execution_model": execution_model}
+            if use_portfolio_backtester:
+                kwargs["portfolio_cfg"] = pbt_cfg
+            train_metrics = eval_fn(train_ex, variant_cfg, variant_cfg["weights"], **kwargs)
+            test_metrics = eval_fn(test_ex, variant_cfg, variant_cfg["weights"], **kwargs)
             train_scores.append(float(train_metrics.get("objective", 0.0)))
             test_scores.append(float(test_metrics.get("objective", 0.0)))
             split_row = {
@@ -189,7 +204,11 @@ def run_experiment(
             variant_patch = {k: v for k, v in best_variant.items() if k != "name"}
             variant_cfg = _deep_update(base_cfg, variant_patch)
             variant_cfg["weights"] = _normalize_weights(variant_cfg.get("weights", {}))
-            best_oos = evaluate_candidate(oos_examples, variant_cfg, variant_cfg["weights"], execution_model=execution_model)
+            eval_fn = evaluate_candidate_portfolio if use_portfolio_backtester else evaluate_candidate
+            kwargs = {"execution_model": execution_model}
+            if use_portfolio_backtester:
+                kwargs["portfolio_cfg"] = pbt_cfg
+            best_oos = eval_fn(oos_examples, variant_cfg, variant_cfg["weights"], **kwargs)
 
     result = {
         "status": "ok",

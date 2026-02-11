@@ -6,6 +6,7 @@ PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
 
 TRACE_PATH="$ROOT_DIR/logs/recommendation_trace.jsonl"
 TRAIN_TRACE_PATH="$ROOT_DIR/artifacts/models/combined_training_trace.jsonl"
+DATASET_MANIFEST_PATH="$ROOT_DIR/artifacts/models/combined_training_trace.manifest.json"
 EXTERNAL_DATA_DIR="$ROOT_DIR/data/external/alpaca_daily"
 EXTERNAL_DATA_DIR_FINNHUB="$ROOT_DIR/data/external/finnhub_daily"
 EXTERNAL_TRACE_PATH="$ROOT_DIR/artifacts/models/external_trace.jsonl"
@@ -216,6 +217,16 @@ with out.open("w", encoding="utf-8") as w:
             rows += 1
 print(f"COMBINED_ROWS={rows}")
 PY
+
+echo "[retrain] writing dataset version manifest -> $DATASET_MANIFEST_PATH"
+"$PYTHON_BIN" "$ROOT_DIR/scripts/write_dataset_manifest.py" \
+  --dataset "$TRAIN_TRACE_PATH" \
+  --output "$DATASET_MANIFEST_PATH" \
+  --source "$TRACE_PATH" \
+  --source "$EXTERNAL_TRACE_PATH" \
+  --meta "horizon=$HORIZON" \
+  --meta "search_horizons=$SEARCH_HORIZONS" \
+  --meta "search_models=$SEARCH_MODELS"
 
 echo "[retrain] training candidate model"
 "$PYTHON_BIN" -m src.ml.predictive_model \

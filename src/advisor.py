@@ -152,6 +152,7 @@ def run_sp500_cycle(decision, data):
 
 from src.core.sp500_list import TOP20_SECTOR, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
+from src.execution.safeguards import ExecutionSafeguard
 from src.settings import (
     ENABLE_POSITION_ROTATION,
     STARTING_CAPITAL,
@@ -160,6 +161,11 @@ from src.settings import (
     FETCH_BATCH_SIZE,
     TOP20_SLIPPAGE_BPS,
     TOP20_FEE_BPS,
+    EXECUTION_MAX_CONSECUTIVE_FAILURES,
+    EXECUTION_STALE_DATA_MAX_AGE_HOURS,
+    EXECUTION_ANOMALY_ZSCORE_THRESHOLD,
+    EXECUTION_MAX_CYCLE_NOTIONAL_TURNOVER,
+    EXECUTION_STEP_MAX_RETRIES,
 )
 
 print(
@@ -177,6 +183,12 @@ top20_manager = Top20AutoManager(
     rotation_min_score_gap=0.15,
     rotation_sell_fraction=0.35,
     rotation_max_swaps_per_step=1,
+)
+execution_safeguard = ExecutionSafeguard(
+    max_consecutive_failures=EXECUTION_MAX_CONSECUTIVE_FAILURES,
+    stale_data_max_age_hours=EXECUTION_STALE_DATA_MAX_AGE_HOURS,
+    anomaly_zscore_threshold=EXECUTION_ANOMALY_ZSCORE_THRESHOLD,
+    max_cycle_notional_turnover=EXECUTION_MAX_CYCLE_NOTIONAL_TURNOVER,
 )
 
 
@@ -394,10 +406,30 @@ def run_top20_cycle_with_signals():
     sells = sum(1 for a in analyses if a["decision"] == "SELL")
     holds = sum(1 for a in analyses if a["decision"] == "HOLD")
     print(f"[cycle] Signals => BUY:{buys} SELL:{sells} HOLD:{holds}")
-    top20_manager.step(analyses)
+    guard = execution_safeguard.assess(
+        analyses=analyses,
+        candidates=candidates,
+        portfolio_value=float(top20_manager.portfolio_value()),
+    )
+    if guard.reasons:
+        print(f"[cycle][guard] active: {', '.join(guard.reasons)}")
+    guarded_analyses = guard.filtered_analyses
+    retries = max(int(EXECUTION_STEP_MAX_RETRIES), 0)
+    attempt = 0
+    while True:
+        try:
+            top20_manager.step(guarded_analyses)
+            execution_safeguard.record_success()
+            break
+        except Exception as exc:
+            attempt += 1
+            execution_safeguard.record_failure(str(exc))
+            print(f"[cycle][execution] step failed attempt={attempt} error={exc}")
+            if attempt > retries:
+                raise
 
     positions = top20_manager.position_snapshot_df()
-    return top20_manager.history_df(), top20_manager.transactions_df(), positions, analyses
+    return top20_manager.history_df(), top20_manager.transactions_df(), positions, guarded_analyses
 
 
 def run_top20_cycle():
