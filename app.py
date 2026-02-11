@@ -1081,3 +1081,31 @@ if trace_for_monitor:
         )
         qfig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), paper_bgcolor=card, plot_bgcolor=card)
         st.plotly_chart(qfig, use_container_width=True)
+
+st.subheader("Engine Flow Reference")
+st.caption("End-to-end trading engine flow (from data fetch to portfolio updates).")
+st.graphviz_chart(
+    """
+    digraph EngineFlow {
+      rankdir=TB;
+      node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#C9D2E3", fontname="Helvetica"];
+      edge [color="#7A8799"];
+
+      A [label="1) Data Fetch\\n(DB + external feeds)"];
+      B [label="2) Feature Build\\n(price, ATR, sentiment, sector)"];
+      C [label="3) Model/Strategy Scoring\\nBUY/HOLD/SELL + score"];
+      D [label="4) Daily Loss Check\\nmax_daily_loss_pct"];
+      E [label="5) Risk-First Exits\\nstop-loss, trailing stop, TP, explicit SELL"];
+      F [label="6) Buy Candidate Filters\\nscore, cooldown, RR, correlation, sector caps"];
+      G [label="7) Vol-Adjusted Sizing\\nallocation + exposure caps"];
+      H [label="8) Order Execution\\nfees/slippage"];
+      I [label="9) Rebalance\\ntrim overweight positions"];
+      J [label="10) Persist State\\nholdings, cash, transactions, history"];
+
+      A -> B -> C -> D;
+      D -> E [label="within limits"];
+      D -> J [label="if loss cap hit: liquidate/block buys"];
+      E -> F -> G -> H -> I -> J;
+    }
+    """
+)
