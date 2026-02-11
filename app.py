@@ -10,7 +10,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
-from src.settings import MANUAL_CHECK_TICKER, TOP20_STARTING_CAPITAL
+from src.settings import TOP20_STARTING_CAPITAL
 from src.common.trace_utils import load_jsonl_dict_rows
 from src.analytics.explainability_report import generate_explainability_report
 from src.ui.stock_logos import get_logo_url
@@ -957,36 +957,16 @@ if not signals.empty:
 else:
     st.caption("No latest signal data yet.")
 
-st.subheader("Manual Ticker Check (ENV)")
-if MANUAL_CHECK_TICKER:
-    if manual_checks.empty:
-        st.caption("No manual worker results yet. Trigger the manual ticker worker from GitHub Actions.")
-    else:
-        scoped = manual_checks[manual_checks["ticker"].astype(str).str.upper() == MANUAL_CHECK_TICKER].copy()
-        if scoped.empty:
-            st.caption(
-                f"No saved manual check found for `{MANUAL_CHECK_TICKER}`. "
-                "Trigger the manual ticker worker and pass the same ticker."
-            )
-            scoped = manual_checks.head(1).copy()
-        else:
-            scoped = scoped.head(1).copy()
-        manual_df = scoped[["time", "ticker", "decision", "reason", "score", "price", "signal_confidence"]].copy()
-        manual_df["score"] = manual_df["score"].map(lambda v: f"{float(v):.3f}")
-        manual_df["price"] = manual_df["price"].map(lambda v: f"{float(v):.2f}")
-        manual_df["signal_confidence"] = manual_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
-        st.caption(f"Source: MANUAL_CHECK_TICKER={MANUAL_CHECK_TICKER}")
-        st.dataframe(_style_decision_cols(manual_df, ["decision"]), use_container_width=True, hide_index=True)
+st.subheader("Manual Ticker Check (Worker Result)")
+if manual_checks.empty:
+    st.caption("No manual worker results yet. Trigger the manual ticker worker in GitHub Actions.")
 else:
-    if manual_checks.empty:
-        st.caption("Set `MANUAL_CHECK_TICKER` in ENV (example: `U`) and trigger manual ticker worker in GitHub Actions.")
-    else:
-        latest_df = manual_checks.head(1)[["time", "ticker", "decision", "reason", "score", "price", "signal_confidence"]].copy()
-        latest_df["score"] = latest_df["score"].map(lambda v: f"{float(v):.3f}")
-        latest_df["price"] = latest_df["price"].map(lambda v: f"{float(v):.2f}")
-        latest_df["signal_confidence"] = latest_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
-        st.caption("Latest manual check (set `MANUAL_CHECK_TICKER` to pin a specific ticker).")
-        st.dataframe(_style_decision_cols(latest_df, ["decision"]), use_container_width=True, hide_index=True)
+    latest_df = manual_checks.head(1)[["time", "ticker", "decision", "reason", "score", "price", "signal_confidence"]].copy()
+    latest_df["score"] = latest_df["score"].map(lambda v: f"{float(v):.3f}")
+    latest_df["price"] = latest_df["price"].map(lambda v: f"{float(v):.2f}")
+    latest_df["signal_confidence"] = latest_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
+    st.caption("Source of truth: latest row in `manual_ticker_checks` written by manual worker.")
+    st.dataframe(_style_decision_cols(latest_df, ["decision"]), use_container_width=True, hide_index=True)
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
