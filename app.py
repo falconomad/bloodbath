@@ -674,6 +674,17 @@ if db_ready:
             """,
             conn,
         )
+    except Exception:
+        portfolio = pd.DataFrame()
+        transactions = pd.DataFrame()
+        positions = pd.DataFrame()
+        signals = pd.DataFrame()
+    finally:
+        conn.close()
+
+    # Keep manual-check fetch isolated so one table issue does not blank the full dashboard.
+    try:
+        conn = get_connection()
         manual_checks = pd.read_sql(
             """
             SELECT *
@@ -683,14 +694,10 @@ if db_ready:
             """,
             conn,
         )
-    except Exception:
-        portfolio = pd.DataFrame()
-        transactions = pd.DataFrame()
-        positions = pd.DataFrame()
-        signals = pd.DataFrame()
-        manual_checks = pd.DataFrame()
-    finally:
         conn.close()
+    except Exception as exc:
+        manual_checks = pd.DataFrame()
+        st.caption(f"Manual check table unavailable: {exc}")
 else:
     portfolio = pd.DataFrame()
     transactions = pd.DataFrame()
@@ -971,7 +978,15 @@ if MANUAL_CHECK_TICKER:
         st.caption(f"Source: MANUAL_CHECK_TICKER={MANUAL_CHECK_TICKER}")
         st.dataframe(_style_decision_cols(manual_df, ["decision"]), use_container_width=True, hide_index=True)
 else:
-    st.caption("Set `MANUAL_CHECK_TICKER` in ENV (example: `U`) and trigger manual ticker worker in GitHub Actions.")
+    if manual_checks.empty:
+        st.caption("Set `MANUAL_CHECK_TICKER` in ENV (example: `U`) and trigger manual ticker worker in GitHub Actions.")
+    else:
+        latest_df = manual_checks.head(1)[["time", "ticker", "decision", "reason", "score", "price", "signal_confidence"]].copy()
+        latest_df["score"] = latest_df["score"].map(lambda v: f"{float(v):.3f}")
+        latest_df["price"] = latest_df["price"].map(lambda v: f"{float(v):.2f}")
+        latest_df["signal_confidence"] = latest_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
+        st.caption("Latest manual check (set `MANUAL_CHECK_TICKER` to pin a specific ticker).")
+        st.dataframe(_style_decision_cols(latest_df, ["decision"]), use_container_width=True, hide_index=True)
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:
