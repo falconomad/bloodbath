@@ -417,7 +417,27 @@ def run_top20_cycle_with_signals():
         print(f"[cycle] {ticker}: mark-to-market price={price:.2f}")
 
     if ENABLE_GEMINI_PRETRADE_CHECK and gemini_guard.enabled():
+        before = gemini_guard.status_snapshot()
         analyses = gemini_guard.apply(analyses)
+        after = gemini_guard.status_snapshot()
+        actions = {}
+        cache_hits = 0
+        for row in analyses:
+            action = str(row.get("gemini_action", "")).strip().upper()
+            if action:
+                actions[action] = actions.get(action, 0) + 1
+            if bool(row.get("gemini_cached", False)):
+                cache_hits += 1
+        delta_calls = max(int(after.get("calls_today", 0)) - int(before.get("calls_today", 0)), 0)
+        delta_tokens = max(int(after.get("tokens_today", 0)) - int(before.get("tokens_today", 0)), 0)
+        print(
+            "[cycle][gemini] "
+            f"model={after.get('model','-')} enabled={after.get('enabled', False)} "
+            f"calls+={delta_calls} tokens+={delta_tokens} "
+            f"calls_today={after.get('calls_today', 0)}/{after.get('hard_cap', 0)} "
+            f"cache_hits={cache_hits} actions={actions or {'NONE': 0}} "
+            f"cooldown_until={after.get('cooldown_until', '-') or '-'}"
+        )
     buys = sum(1 for a in analyses if a["decision"] == "BUY")
     sells = sum(1 for a in analyses if a["decision"] == "SELL")
     holds = sum(1 for a in analyses if a["decision"] == "HOLD")

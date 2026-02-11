@@ -33,6 +33,28 @@ class GeminiGuard:
     def enabled(self) -> bool:
         return bool(self.api_key) and self.max_calls_per_cycle > 0 and self.max_calls_per_day > 0
 
+    def status_snapshot(self) -> dict[str, Any]:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date = str(self._state.get("date", ""))
+        calls_today = int(self._state.get("calls_today", 0) or 0) if date == today else 0
+        tokens_today = int(self._state.get("tokens_today", 0) or 0) if date == today else 0
+        dynamic_cap = int(self._state.get("dynamic_daily_cap", self._base_daily_cap) or self._base_daily_cap)
+        hard_cap = min(self.max_calls_per_day, dynamic_cap)
+        cache = self._state.get("verdict_cache", {}) or {}
+        return {
+            "enabled": self.enabled(),
+            "model": self.model,
+            "calls_today": calls_today,
+            "tokens_today": tokens_today,
+            "hard_cap": hard_cap,
+            "remaining_calls_today": max(hard_cap - calls_today, 0),
+            "cooldown_until": str(self._state.get("cooldown_until", "") or ""),
+            "last_call_ts": str(self._state.get("last_call_ts", "") or ""),
+            "last_rate_limit_ts": str(self._state.get("last_rate_limit_ts", "") or ""),
+            "cache_size": len(cache),
+            "max_tickers_per_request": self.max_tickers_per_request,
+        }
+
     def _default_daily_cap(self, model: str) -> int:
         m = str(model or "").lower()
         if "flash-lite" in m:

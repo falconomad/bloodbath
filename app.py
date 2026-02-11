@@ -6,7 +6,7 @@ import base64
 import requests
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
@@ -481,6 +481,17 @@ def _load_latest_experiment_result():
 
 
 def _load_execution_guard_state(path: str = "logs/execution_guard_state.json") -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_gemini_guard_state(path: str = "logs/gemini_guard_state.json") -> dict:
     p = Path(path)
     if not p.exists():
         return {}
@@ -1112,6 +1123,31 @@ else:
     s4.metric("Circuit Breaker", "ACTIVE" if consecutive_failures > 0 else "IDLE")
     st.caption(f"Last failure time: {last_failure_ts}")
     st.caption(f"Last failure reason: {last_failure_reason}")
+
+st.subheader("Gemini Guard Status")
+gemini_state = _load_gemini_guard_state()
+if not gemini_state:
+    st.caption("No Gemini guard state file found yet.")
+else:
+    now_utc = datetime.now(timezone.utc)
+    today = now_utc.strftime("%Y-%m-%d")
+    state_date = str(gemini_state.get("date", ""))
+    calls_today = int(gemini_state.get("calls_today", 0) or 0) if state_date == today else 0
+    tokens_today = int(gemini_state.get("tokens_today", 0) or 0) if state_date == today else 0
+    dynamic_cap = int(gemini_state.get("dynamic_daily_cap", 0) or 0)
+    cache_size = len(gemini_state.get("verdict_cache", {}) or {})
+    cooldown_until = str(gemini_state.get("cooldown_until", "") or "-")
+    last_call_ts = str(gemini_state.get("last_call_ts", "") or "-")
+    last_rl_ts = str(gemini_state.get("last_rate_limit_ts", "") or "-")
+
+    g1, g2, g3, g4 = st.columns(4)
+    g1.metric("Gemini Calls Today", f"{calls_today}")
+    g2.metric("Gemini Tokens Today", f"{tokens_today}")
+    g3.metric("Dynamic Daily Cap", f"{dynamic_cap}")
+    g4.metric("Verdict Cache Size", f"{cache_size}")
+    st.caption(f"Cooldown until: {cooldown_until}")
+    st.caption(f"Last Gemini call: {last_call_ts}")
+    st.caption(f"Last rate-limit event: {last_rl_ts}")
 
 st.subheader("Engine Flow Reference")
 st.caption("End-to-end trading engine flow (from data fetch to portfolio updates).")
