@@ -9,7 +9,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.db import get_connection, init_db
-from src.advisor import run_manual_ticker_check
+from src.advisor import run_manual_ticker_check_with_inputs
+from src.api.data_fetcher import get_bulk_price_data, get_company_news, get_market_sentiment_news
 from src.settings import MANUAL_CHECK_TICKER
 
 DB_AVAILABLE = True
@@ -52,8 +53,13 @@ def _fetch_tracked_rows(conn):
     return rows
 
 
-def _evaluate_ticker(ticker: str):
-    result = run_manual_ticker_check(ticker)
+def _evaluate_ticker(ticker: str, price_data=None, headlines=None, market_news=None):
+    result = run_manual_ticker_check_with_inputs(
+        ticker=ticker,
+        price_data=price_data,
+        headlines=headlines,
+        market_news=market_news,
+    )
     if result.get("error"):
         return {
             "ticker": ticker,
@@ -109,6 +115,14 @@ def _delete_ticker_row(conn, ticker: str):
     c.close()
 
 
+def _delete_existing_error_rows(conn) -> int:
+    c = conn.cursor()
+    c.execute("DELETE FROM manual_ticker_checks WHERE UPPER(COALESCE(decision, '')) = 'ERROR';")
+    removed = int(c.rowcount or 0)
+    c.close()
+    return removed
+
+
 def _replace_oldest_ticker(conn, old_ticker: str, new_ticker: str, payload: dict, now_ts_text: str):
     c = conn.cursor()
     c.execute(
@@ -149,6 +163,10 @@ def main():
     conn = get_connection()
 
     try:
+        removed_existing_errors = _delete_existing_error_rows(conn)
+        if removed_existing_errors > 0:
+            print(f"[manual-worker] pruned existing ERROR rows: {removed_existing_errors}")
+
         tracked_rows = _fetch_tracked_rows(conn)
         tracked_tickers = [str(r[1]).upper() for r in tracked_rows if str(r[1]).strip()]
 
@@ -181,8 +199,15 @@ def main():
 
         print(f"[manual-worker] refreshing tracked tickers: {tracked_tickers}")
         now_ts_text = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
+        price_map = get_bulk_price_data(tracked_tickers, period="6mo", interval="1d")
+        shared_market_news = get_market_sentiment_news(limit=12)
         for ticker in tracked_tickers:
-            payload = _evaluate_ticker(ticker)
+            payload = _evaluate_ticker(
+                ticker,
+                price_data=price_map.get(ticker),
+                headlines=get_company_news(ticker, structured=True),
+                market_news=shared_market_news,
+            )
             if str(payload.get("decision", "")).upper() == "ERROR":
                 _delete_ticker_row(conn, ticker)
                 print(f"[manual-worker] {ticker} removed from watchlist (decision=ERROR reason={payload['reason']})")

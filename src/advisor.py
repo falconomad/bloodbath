@@ -406,15 +406,24 @@ def run_top20_cycle():
 
 
 def run_manual_ticker_check(ticker: str):
+    return run_manual_ticker_check_with_inputs(ticker=ticker)
+
+
+def run_manual_ticker_check_with_inputs(
+    ticker: str,
+    price_data=None,
+    headlines=None,
+    market_news=None,
+):
     symbol = str(ticker or "").strip().upper().replace(".", "-")
     if not symbol:
         return {"ticker": "", "error": "missing_ticker"}
 
-    data = get_price_data(symbol, period="6mo", interval="1d")
+    data = price_data if price_data is not None else get_price_data(symbol, period="6mo", interval="1d")
     if data is None or data.empty:
         return {"ticker": symbol, "error": "price_data_unavailable"}
 
-    headlines = get_company_news(symbol, structured=True)
+    headlines = headlines if headlines is not None else get_company_news(symbol, structured=True)
     dip_score, drawdown, stabilized, volatility_penalty = dip_bonus(data)
     dip_meta = {
         "dip_score": dip_score,
@@ -433,7 +442,7 @@ def run_manual_ticker_check(ticker: str):
         cfg=SCORING_CONFIG,
         decision_state={},
         portfolio_context=_portfolio_risk_context_for_ticker(symbol, [], candidate_ctx),
-        market_news=get_market_sentiment_news(limit=12),
+        market_news=market_news if market_news is not None else get_market_sentiment_news(limit=12),
     )
     price = _as_float(data["Close"].iloc[-1])
     return {
