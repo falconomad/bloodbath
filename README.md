@@ -31,3 +31,12 @@ Fresh Start (Reset State + Set Capital):
 
 - `./.venv/bin/python scripts/fresh_start.py 5000`
 - This resets persisted trading state tables, seeds the portfolio to the provided amount, and updates `.env` with `STARTING_CAPITAL`.
+
+Predictive Model Training (Next 5/10 Step Returns):
+
+- `./.venv/bin/python -m src.ml.predictive_model --trace logs/recommendation_trace.jsonl --horizon 5 --model random_forest`
+- `./.venv/bin/python -m src.ml.predictive_model --trace logs/recommendation_trace.jsonl --horizon 10 --model gradient_boosting`
+- Save model artifact for live inference:
+  - `./.venv/bin/python -m src.ml.predictive_model --trace logs/recommendation_trace.jsonl --horizon 5 --model random_forest --save-artifact artifacts/models/return_model.pkl`
+- Outputs classification metrics (`precision`, `recall`, `roc_auc`) and profit metrics (`strategy_total_return`, `profit_factor`, `avg_trade_expectancy`).
+- Live engine auto-uses ML score when a model artifact is found at `artifacts/models/return_model.pkl` (or `artifacts/return_model.pkl`), and falls back to heuristic scoring if no artifact is available.

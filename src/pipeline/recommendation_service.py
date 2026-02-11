@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -19,12 +20,45 @@ from src.pipeline.decision_engine import (
     weighted_score,
     write_trace,
 )
+from src.ml.predictive_model import build_feature_row_for_inference, load_model_artifact, predict_from_artifact
 from src.validation.data_validation import (
     validate_earnings_payload,
     validate_micro_features,
     validate_news_headlines,
     validate_price_history,
 )
+
+_ML_ARTIFACT_CACHE: dict[str, Any] | None = None
+_ML_ARTIFACT_CACHE_PATH: str | None = None
+_ML_ARTIFACT_CANDIDATES = [
+    "artifacts/models/return_model.pkl",
+    "artifacts/return_model.pkl",
+]
+
+
+def _load_ml_artifact_cached(path: str) -> dict[str, Any] | None:
+    global _ML_ARTIFACT_CACHE, _ML_ARTIFACT_CACHE_PATH
+    norm = str(path or "").strip()
+    if not norm:
+        return None
+    if _ML_ARTIFACT_CACHE_PATH == norm and _ML_ARTIFACT_CACHE is not None:
+        return _ML_ARTIFACT_CACHE
+    artifact = load_model_artifact(norm)
+    if artifact is None:
+        return None
+    _ML_ARTIFACT_CACHE = artifact
+    _ML_ARTIFACT_CACHE_PATH = norm
+    return artifact
+
+
+def _auto_load_ml_artifact() -> dict[str, Any] | None:
+    for candidate in _ML_ARTIFACT_CANDIDATES:
+        if not Path(candidate).exists():
+            continue
+        artifact = _load_ml_artifact_cached(candidate)
+        if artifact is not None:
+            return artifact
+    return None
 
 
 def trend_to_score(trend: str) -> float:
@@ -317,14 +351,34 @@ def generate_recommendation_core(
         market_news=market_news,
     )
     weights, active_regime = resolve_effective_weights(cfg, risk_context)
-    score = weighted_score(signals, weights)
-    signal_confidence, conflicts = aggregate_confidence(
+    heuristic_score = weighted_score(signals, weights)
+    heuristic_confidence, conflicts = aggregate_confidence(
         signals,
         cfg.get("risk", {}).get("conflict_penalty", 0.2),
         weights=weights,
         max_conflict_drop=cfg.get("risk", {}).get("max_confidence_drop_on_conflict", 0.75),
     )
-    signal_confidence = clamp(signal_confidence, 0.0, 1.0)
+    heuristic_confidence = clamp(heuristic_confidence, 0.0, 1.0)
+    score = heuristic_score
+    signal_confidence = heuristic_confidence
+    ml_prediction: dict[str, float] | None = None
+    artifact = _auto_load_ml_artifact()
+    if artifact is not None:
+        feature_row = build_feature_row_for_inference(
+            signals={k: s.as_dict() for k, s in signals.items()},
+            risk_context=risk_context,
+            score=heuristic_score,
+            conflict_ratio=conflicts,
+            confidence=heuristic_confidence,
+        )
+        ml_prediction = predict_from_artifact(artifact, feature_row)
+        if ml_prediction is not None:
+            prob_up = clamp(float(ml_prediction.get("prob_up", 0.5)), 0.0, 1.0)
+            expected_ret = float(ml_prediction.get("expected_return", 0.0))
+            model_score = clamp((2.0 * (prob_up - 0.5)) + (6.0 * expected_ret), -1.0, 1.0)
+            model_conf = clamp(abs(prob_up - 0.5) * 2.0, 0.0, 1.0)
+            score = model_score
+            signal_confidence = model_conf
     event_score = float(signals["events"].value)
     sentiment = float(signals["sentiment"].value)
     event_flag = abs(event_score) > 0.0
@@ -346,6 +400,10 @@ def generate_recommendation_core(
             "price": round(price, 6),
             "score": round(score, 6),
             "confidence": round(signal_confidence, 6),
+            "score_source": "ml" if ml_prediction is not None else "heuristic",
+            "heuristic_score": round(heuristic_score, 6),
+            "heuristic_confidence": round(heuristic_confidence, 6),
+            "ml_prediction": ml_prediction,
             "decision": decision,
             "decision_reasons": decision_reasons,
             "weights": weights,
@@ -375,6 +433,9 @@ def generate_recommendation_core(
         "market_regime": risk_context.get("market_regime", "default"),
         "active_regime": active_regime,
         "composite_score": round(score, 4),
+        "score_source": "ml" if ml_prediction is not None else "heuristic",
+        "heuristic_score": round(heuristic_score, 4),
+        "ml_prediction": ml_prediction or {},
         "decision": decision,
         "confidence": round(confidence, 2),
         "decision_reasons": decision_reasons,
