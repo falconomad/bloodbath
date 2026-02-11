@@ -7,6 +7,7 @@ PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
 TRACE_PATH="$ROOT_DIR/logs/recommendation_trace.jsonl"
 TRAIN_TRACE_PATH="$ROOT_DIR/artifacts/models/combined_training_trace.jsonl"
 EXTERNAL_DATA_DIR="$ROOT_DIR/data/external/alpaca_daily"
+EXTERNAL_DATA_DIR_FINNHUB="$ROOT_DIR/data/external/finnhub_daily"
 EXTERNAL_TRACE_PATH="$ROOT_DIR/artifacts/models/external_trace.jsonl"
 MODEL_DIR="$ROOT_DIR/artifacts/models"
 MODEL_PATH="$MODEL_DIR/return_model.pkl"
@@ -116,12 +117,55 @@ if [[ ! -s "$TRACE_PATH" ]]; then
   exit 1
 fi
 
-# Optional external dataset merge from Alpaca historical CSVs.
-if [[ "$USE_EXTERNAL" -eq 1 && -d "$EXTERNAL_DATA_DIR" ]]; then
-  echo "[retrain] building external trace from $EXTERNAL_DATA_DIR"
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/build_external_trace.py" \
-    --input-dir "$EXTERNAL_DATA_DIR" \
-    --output "$EXTERNAL_TRACE_PATH"
+# Optional external dataset merge from Alpaca/Finnhub historical CSVs.
+if [[ "$USE_EXTERNAL" -eq 1 ]]; then
+  PART_A="$ROOT_DIR/artifacts/models/_ext_part_alpaca.jsonl"
+  PART_F="$ROOT_DIR/artifacts/models/_ext_part_finnhub.jsonl"
+  rm -f "$PART_A" "$PART_F" "$EXTERNAL_TRACE_PATH"
+
+  if [[ -d "$EXTERNAL_DATA_DIR" ]]; then
+    echo "[retrain] building external trace from $EXTERNAL_DATA_DIR"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/build_external_trace.py" \
+      --input-dir "$EXTERNAL_DATA_DIR" \
+      --output "$PART_A"
+  fi
+
+  if [[ -d "$EXTERNAL_DATA_DIR_FINNHUB" ]]; then
+    echo "[retrain] building external trace from $EXTERNAL_DATA_DIR_FINNHUB"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/build_external_trace.py" \
+      --input-dir "$EXTERNAL_DATA_DIR_FINNHUB" \
+      --output "$PART_F"
+  fi
+
+  "$PYTHON_BIN" - <<PY
+import json
+from pathlib import Path
+
+parts = [Path("$PART_A"), Path("$PART_F")]
+out = Path("$EXTERNAL_TRACE_PATH")
+out.parent.mkdir(parents=True, exist_ok=True)
+seen = set()
+rows = 0
+with out.open("w", encoding="utf-8") as w:
+    for part in parts:
+        if not part.exists():
+            continue
+        for line in part.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            key = (str(obj.get("ticker", "")).upper(), str(obj.get("ts", "")))
+            if not key[0] or not key[1] or key in seen:
+                continue
+            seen.add(key)
+            w.write(json.dumps(obj, separators=(",", ":")) + "\\n")
+            rows += 1
+print(f"EXTERNAL_ROWS={rows}")
+PY
 fi
 
 echo "[retrain] preparing combined training trace -> $TRAIN_TRACE_PATH"

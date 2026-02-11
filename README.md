@@ -67,3 +67,9 @@ Alpaca External Data Ingestion (Free-Tier Safe):
   - fetches only missing window from last saved date forward
 - Test plan without credentials/calls:
   - `./.venv/bin/python scripts/ingest_alpaca_history.py --universe top20 --max-symbols 5 --dry-run`
+
+Finnhub External Data Ingestion (Free-Tier Safe):
+
+- `./.venv/bin/python scripts/ingest_finnhub_history.py --universe top20 --sleep-sec 1.1 --max-requests 45`
+- Test plan without credentials/calls:
+  - `./.venv/bin/python scripts/ingest_finnhub_history.py --universe top20 --max-symbols 5 --dry-run`
