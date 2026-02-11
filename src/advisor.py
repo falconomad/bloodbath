@@ -153,6 +153,7 @@ def run_sp500_cycle(decision, data):
 from src.core.sp500_list import TOP20_SECTOR, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
 from src.execution.safeguards import ExecutionSafeguard
+from src.execution.gemini_guard import GeminiGuard
 from src.settings import (
     ENABLE_POSITION_ROTATION,
     STARTING_CAPITAL,
@@ -166,6 +167,12 @@ from src.settings import (
     EXECUTION_ANOMALY_ZSCORE_THRESHOLD,
     EXECUTION_MAX_CYCLE_NOTIONAL_TURNOVER,
     EXECUTION_STEP_MAX_RETRIES,
+    GEMINI_API_KEY,
+    ENABLE_GEMINI_PRETRADE_CHECK,
+    GEMINI_MODEL,
+    GEMINI_MAX_CALLS_PER_CYCLE,
+    GEMINI_MAX_CALLS_PER_DAY,
+    GEMINI_TIMEOUT_SECONDS,
 )
 
 print(
@@ -189,6 +196,13 @@ execution_safeguard = ExecutionSafeguard(
     stale_data_max_age_hours=EXECUTION_STALE_DATA_MAX_AGE_HOURS,
     anomaly_zscore_threshold=EXECUTION_ANOMALY_ZSCORE_THRESHOLD,
     max_cycle_notional_turnover=EXECUTION_MAX_CYCLE_NOTIONAL_TURNOVER,
+)
+gemini_guard = GeminiGuard(
+    api_key=GEMINI_API_KEY,
+    model=GEMINI_MODEL,
+    max_calls_per_cycle=GEMINI_MAX_CALLS_PER_CYCLE,
+    max_calls_per_day=GEMINI_MAX_CALLS_PER_DAY,
+    timeout_seconds=GEMINI_TIMEOUT_SECONDS,
 )
 
 
@@ -402,6 +416,8 @@ def run_top20_cycle_with_signals():
         )
         print(f"[cycle] {ticker}: mark-to-market price={price:.2f}")
 
+    if ENABLE_GEMINI_PRETRADE_CHECK and gemini_guard.enabled():
+        analyses = gemini_guard.apply(analyses)
     buys = sum(1 for a in analyses if a["decision"] == "BUY")
     sells = sum(1 for a in analyses if a["decision"] == "SELL")
     holds = sum(1 for a in analyses if a["decision"] == "HOLD")
