@@ -152,6 +152,11 @@ def main():
         tracked_rows = _fetch_tracked_rows(conn)
         tracked_tickers = [str(r[1]).upper() for r in tracked_rows if str(r[1]).strip()]
 
+        run_existing_only = requested_ticker == "RUN"
+        if run_existing_only:
+            print("[manual-worker] RUN mode enabled: refreshing existing DB tickers only")
+            requested_ticker = ""
+
         if requested_ticker:
             if requested_ticker not in tracked_tickers:
                 if len(tracked_tickers) >= MAX_TRACKED_TICKERS:
