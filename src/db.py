@@ -123,13 +123,14 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS manual_ticker_checks (
             id BIGSERIAL PRIMARY KEY,
-            time TEXT,
             ticker TEXT,
             decision TEXT,
             reason TEXT,
             score REAL,
             price REAL,
-            signal_confidence REAL
+            signal_confidence REAL,
+            added_at TIMESTAMPTZ DEFAULT NOW(),
+            last_checked_at TIMESTAMPTZ DEFAULT NOW()
         );
     """
     )
@@ -140,6 +141,24 @@ def init_db():
     cur.execute("ALTER TABLE position_snapshots ALTER COLUMN shares TYPE REAL USING shares::REAL;")
     cur.execute("ALTER TABLE recommendation_signals ADD COLUMN IF NOT EXISTS mover_bucket TEXT;")
     cur.execute("ALTER TABLE recommendation_signals ADD COLUMN IF NOT EXISTS daily_return REAL;")
+    cur.execute("ALTER TABLE manual_ticker_checks ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ DEFAULT NOW();")
+    cur.execute("ALTER TABLE manual_ticker_checks ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ DEFAULT NOW();")
+    cur.execute(
+        """
+        ALTER TABLE manual_ticker_checks
+        ADD COLUMN IF NOT EXISTS time TEXT;
+        """
+    )
+    cur.execute("UPDATE manual_ticker_checks SET ticker = UPPER(COALESCE(ticker, ''));")
+    cur.execute(
+        """
+        DELETE FROM manual_ticker_checks a
+        USING manual_ticker_checks b
+        WHERE a.id < b.id
+          AND UPPER(COALESCE(a.ticker, '')) = UPPER(COALESCE(b.ticker, ''));
+        """
+    )
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS manual_ticker_checks_ticker_uq ON manual_ticker_checks (ticker);")
 
     conn.commit()
     cur.close()

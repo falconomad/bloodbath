@@ -689,8 +689,8 @@ if db_ready:
             """
             SELECT *
             FROM manual_ticker_checks
-            ORDER BY id DESC
-            LIMIT 200
+            ORDER BY added_at ASC NULLS LAST, id ASC
+            LIMIT 5
             """,
             conn,
         )
@@ -961,12 +961,16 @@ st.subheader("Manual Ticker Check (Worker Result)")
 if manual_checks.empty:
     st.caption("No manual worker results yet. Trigger the manual ticker worker in GitHub Actions.")
 else:
-    latest_df = manual_checks.head(1)[["time", "ticker", "decision", "reason", "score", "price", "signal_confidence"]].copy()
-    latest_df["score"] = latest_df["score"].map(lambda v: f"{float(v):.3f}")
-    latest_df["price"] = latest_df["price"].map(lambda v: f"{float(v):.2f}")
-    latest_df["signal_confidence"] = latest_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
-    st.caption("Source of truth: latest row in `manual_ticker_checks` written by manual worker.")
-    st.dataframe(_style_decision_cols(latest_df, ["decision"]), use_container_width=True, hide_index=True)
+    view_cols = [col for col in ["ticker", "decision", "reason", "score", "price", "signal_confidence", "added_at", "last_checked_at"] if col in manual_checks.columns]
+    manual_df = manual_checks[view_cols].copy()
+    if "score" in manual_df.columns:
+        manual_df["score"] = manual_df["score"].map(lambda v: f"{float(v):.3f}")
+    if "price" in manual_df.columns:
+        manual_df["price"] = manual_df["price"].map(lambda v: f"{float(v):.2f}")
+    if "signal_confidence" in manual_df.columns:
+        manual_df["signal_confidence"] = manual_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
+    st.caption("Watchlist max 5 tickers (FIFO replace on new 6th); all tracked tickers are refreshed each manual worker run.")
+    st.dataframe(_style_decision_cols(manual_df, ["decision"]), use_container_width=True, hide_index=True)
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:

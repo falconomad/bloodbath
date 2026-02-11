@@ -13,6 +13,7 @@ from src.advisor import run_manual_ticker_check
 from src.settings import MANUAL_CHECK_TICKER
 
 DB_AVAILABLE = True
+MAX_TRACKED_TICKERS = 5
 
 try:
     init_db()
@@ -21,7 +22,7 @@ except Exception as exc:
     print(f"[manual-worker] database initialization failed: {exc}")
 
 
-def _resolve_ticker() -> str:
+def _resolve_requested_ticker() -> str:
     cli = os.getenv("MANUAL_CHECK_TICKER_INPUT", "").strip().upper()
     if cli:
         return cli.replace(".", "-")
@@ -37,64 +38,151 @@ def _short_reason(reasons):
     return first[:120] if first else "-"
 
 
-def save_manual_result(result: dict):
-    if not DB_AVAILABLE:
-        print("[manual-worker] save skipped: database unavailable")
-        return
-
-    conn = get_connection()
+def _fetch_tracked_rows(conn):
     c = conn.cursor()
-
-    now_ts = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
     c.execute(
         """
-        INSERT INTO manual_ticker_checks (
-            time, ticker, decision, reason, score, price, signal_confidence
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            now_ts,
-            str(result.get("ticker", "")),
-            str(result.get("decision", "HOLD")),
-            str(result.get("reason", "-")),
-            float(result.get("score", 0.0)),
-            float(result.get("price", 0.0)),
-            float(result.get("signal_confidence", 0.0)),
-        ),
+        SELECT id, ticker, added_at
+        FROM manual_ticker_checks
+        ORDER BY added_at ASC NULLS LAST, id ASC
+        """
     )
-
-    conn.commit()
+    rows = c.fetchall() or []
     c.close()
-    conn.close()
-    print(f"[manual-worker] saved check for {result.get('ticker', '')}")
+    return rows
 
 
-def main():
-    ticker = _resolve_ticker()
-    if not ticker:
-        print("[manual-worker] no ticker configured; set MANUAL_CHECK_TICKER or MANUAL_CHECK_TICKER_INPUT")
-        return
-
-    print(f"[manual-worker] running manual check for ticker={ticker}")
+def _evaluate_ticker(ticker: str):
     result = run_manual_ticker_check(ticker)
     if result.get("error"):
-        print(f"[manual-worker] check failed: {result['error']}")
-        return
-
-    payload = {
-        "ticker": str(result.get("ticker", ticker)),
+        return {
+            "ticker": ticker,
+            "decision": "ERROR",
+            "reason": str(result.get("error")),
+            "score": 0.0,
+            "price": 0.0,
+            "signal_confidence": 0.0,
+        }
+    return {
+        "ticker": str(result.get("ticker", ticker)).upper(),
         "decision": str(result.get("decision", "HOLD")),
         "reason": _short_reason(result.get("decision_reasons", [])),
         "score": float(result.get("score", 0.0)),
         "price": float(result.get("price", 0.0)),
         "signal_confidence": float(result.get("signal_confidence", 0.0)),
     }
-    print(
-        "[manual-worker] decision="
-        f"{payload['decision']} score={payload['score']:.4f} conf={payload['signal_confidence']:.4f} "
-        f"reason={payload['reason']}"
+
+
+def _upsert_result(conn, payload: dict, now_ts_text: str):
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO manual_ticker_checks (
+            time, ticker, decision, reason, score, price, signal_confidence, added_at, last_checked_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+        ON CONFLICT (ticker)
+        DO UPDATE SET
+            time = EXCLUDED.time,
+            decision = EXCLUDED.decision,
+            reason = EXCLUDED.reason,
+            score = EXCLUDED.score,
+            price = EXCLUDED.price,
+            signal_confidence = EXCLUDED.signal_confidence,
+            last_checked_at = NOW()
+        """,
+        (
+            now_ts_text,
+            str(payload.get("ticker", "")).upper(),
+            str(payload.get("decision", "HOLD")),
+            str(payload.get("reason", "-")),
+            float(payload.get("score", 0.0)),
+            float(payload.get("price", 0.0)),
+            float(payload.get("signal_confidence", 0.0)),
+        ),
     )
-    save_manual_result(payload)
+    c.close()
+
+
+def _replace_oldest_ticker(conn, old_ticker: str, new_ticker: str, payload: dict, now_ts_text: str):
+    c = conn.cursor()
+    c.execute(
+        """
+        UPDATE manual_ticker_checks
+        SET
+            ticker = %s,
+            time = %s,
+            decision = %s,
+            reason = %s,
+            score = %s,
+            price = %s,
+            signal_confidence = %s,
+            added_at = NOW(),
+            last_checked_at = NOW()
+        WHERE ticker = %s
+        """,
+        (
+            new_ticker,
+            now_ts_text,
+            str(payload.get("decision", "HOLD")),
+            str(payload.get("reason", "-")),
+            float(payload.get("score", 0.0)),
+            float(payload.get("price", 0.0)),
+            float(payload.get("signal_confidence", 0.0)),
+            old_ticker,
+        ),
+    )
+    c.close()
+
+
+def main():
+    if not DB_AVAILABLE:
+        print("[manual-worker] database unavailable")
+        return
+
+    requested_ticker = _resolve_requested_ticker()
+    conn = get_connection()
+
+    try:
+        tracked_rows = _fetch_tracked_rows(conn)
+        tracked_tickers = [str(r[1]).upper() for r in tracked_rows if str(r[1]).strip()]
+
+        if requested_ticker:
+            if requested_ticker not in tracked_tickers:
+                if len(tracked_tickers) >= MAX_TRACKED_TICKERS:
+                    oldest_ticker = tracked_tickers[0]
+                    print(
+                        f"[manual-worker] watchlist full ({MAX_TRACKED_TICKERS}); "
+                        f"replacing oldest {oldest_ticker} -> {requested_ticker}"
+                    )
+                    now_ts_text = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
+                    new_payload = _evaluate_ticker(requested_ticker)
+                    _replace_oldest_ticker(conn, oldest_ticker, requested_ticker, new_payload, now_ts_text)
+                    tracked_tickers = tracked_tickers[1:] + [requested_ticker]
+                else:
+                    tracked_tickers.append(requested_ticker)
+            else:
+                print(f"[manual-worker] requested ticker already tracked: {requested_ticker}")
+
+        if not tracked_tickers:
+            print("[manual-worker] no tracked tickers. Set MANUAL_CHECK_TICKER or pass workflow input ticker")
+            conn.commit()
+            return
+
+        print(f"[manual-worker] refreshing tracked tickers: {tracked_tickers}")
+        now_ts_text = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
+        for ticker in tracked_tickers:
+            payload = _evaluate_ticker(ticker)
+            _upsert_result(conn, payload, now_ts_text)
+            print(
+                "[manual-worker] "
+                f"{ticker} decision={payload['decision']} score={payload['score']:.4f} "
+                f"conf={payload['signal_confidence']:.4f} reason={payload['reason']}"
+            )
+
+        conn.commit()
+        print("[manual-worker] save complete")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
