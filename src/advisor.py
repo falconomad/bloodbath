@@ -162,6 +162,7 @@ from src.settings import (
     FETCH_BATCH_SIZE,
     TOP20_SLIPPAGE_BPS,
     TOP20_FEE_BPS,
+    TOP20_TAKE_PROFIT_PCT,
     EXECUTION_MAX_CONSECUTIVE_FAILURES,
     EXECUTION_STALE_DATA_MAX_AGE_HOURS,
     EXECUTION_ANOMALY_ZSCORE_THRESHOLD,
@@ -173,6 +174,14 @@ from src.settings import (
     GEMINI_MAX_CALLS_PER_CYCLE,
     GEMINI_MAX_CALLS_PER_DAY,
     GEMINI_TIMEOUT_SECONDS,
+    LOSER_HUNTER_ENABLED,
+    LOSER_UNIVERSE_SIZE,
+    LOSER_TOP_K,
+    LOSER_MIN_DROP_PCT,
+    LOSER_REQUIRE_STABILIZATION,
+    LOSER_MIN_DIP_SCORE,
+    LOSER_INCLUDE_GAINERS,
+    LOSER_PROFIT_ALERT_PCT,
 )
 
 print(
@@ -184,6 +193,7 @@ print(
 top20_manager = Top20AutoManager(
     starting_capital=STARTING_CAPITAL,
     min_buy_score=TOP20_MIN_BUY_SCORE,
+    take_profit_pct=TOP20_TAKE_PROFIT_PCT,
     slippage_bps=TOP20_SLIPPAGE_BPS,
     fee_bps=TOP20_FEE_BPS,
     enable_position_rotation=ENABLE_POSITION_ROTATION,
@@ -252,9 +262,14 @@ def _build_candidate_list(universe_size=500, top_losers=10, top_gainers=10):
             continue
         movers.append((ticker, data, daily_ret))
 
-    losers = sorted(movers, key=lambda item: item[2])[: max(int(top_losers), 0)]
+    min_drop = max(float(LOSER_MIN_DROP_PCT), 0.0)
+    losers_ranked = sorted(movers, key=lambda item: item[2])
+    losers_filtered = [item for item in losers_ranked if float(item[2]) <= -min_drop]
+    losers = losers_filtered[: max(int(top_losers), 0)] if losers_filtered else losers_ranked[: max(int(top_losers), 0)]
     gainers = sorted(movers, key=lambda item: item[2], reverse=True)[: max(int(top_gainers), 0)]
-    selected = losers + [item for item in gainers if item[0] not in {row[0] for row in losers}]
+    selected = list(losers)
+    if LOSER_INCLUDE_GAINERS:
+        selected += [item for item in gainers if item[0] not in {row[0] for row in losers}]
 
     print(
         f"[cycle] Movers selected: losers={len(losers)} gainers={len(gainers)} "
@@ -263,6 +278,11 @@ def _build_candidate_list(universe_size=500, top_losers=10, top_gainers=10):
     final = {}
     for ticker, data, daily_ret in selected:
         dip_score, drawdown, stabilized, volatility_penalty = dip_bonus(data)
+        if LOSER_HUNTER_ENABLED:
+            if LOSER_REQUIRE_STABILIZATION and not stabilized:
+                continue
+            if float(dip_score) < float(LOSER_MIN_DIP_SCORE):
+                continue
         final[ticker] = {
             "data": data,
             "dip_score": dip_score,
@@ -336,7 +356,20 @@ def run_top20_cycle_with_signals():
     _CYCLE_INDEX += 1
     reset_cycle_caches()
     analyses = []
-    candidates = _build_candidate_list()
+    if LOSER_HUNTER_ENABLED:
+        candidates = _build_candidate_list(
+            universe_size=max(int(LOSER_UNIVERSE_SIZE), 50),
+            top_losers=max(int(LOSER_TOP_K), 1),
+            top_gainers=0 if not LOSER_INCLUDE_GAINERS else max(int(LOSER_TOP_K // 2), 1),
+        )
+        print(
+            f"[cycle][loser_hunter] enabled=1 universe={LOSER_UNIVERSE_SIZE} "
+            f"top_k={LOSER_TOP_K} min_drop={LOSER_MIN_DROP_PCT:.3f} "
+            f"stabilize={int(LOSER_REQUIRE_STABILIZATION)} min_dip={LOSER_MIN_DIP_SCORE:.3f} "
+            f"include_gainers={int(LOSER_INCLUDE_GAINERS)} selected={len(candidates)}"
+        )
+    else:
+        candidates = _build_candidate_list()
     cycle_market_news = get_market_sentiment_news(limit=12)
 
     print(f"[cycle] Evaluating {len(candidates)} candidate tickers")
@@ -465,6 +498,14 @@ def run_top20_cycle_with_signals():
                 raise
 
     positions = top20_manager.position_snapshot_df()
+    if not positions.empty and "pnl_pct" in positions.columns:
+        hits = positions[positions["pnl_pct"].astype(float) >= float(LOSER_PROFIT_ALERT_PCT)]
+        if not hits.empty:
+            tickers = ",".join(hits["ticker"].astype(str).tolist())
+            print(
+                f"[cycle][profit_alert] threshold={100.0 * float(LOSER_PROFIT_ALERT_PCT):.1f}% "
+                f"hits={len(hits)} tickers={tickers}"
+            )
     return top20_manager.history_df(), top20_manager.transactions_df(), positions, guarded_analyses
 
 

@@ -10,7 +10,7 @@ from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
-from src.settings import STARTING_CAPITAL
+from src.settings import STARTING_CAPITAL, LOSER_PROFIT_ALERT_PCT, LOSER_HUNTER_ENABLED, LOSER_MIN_DROP_PCT, LOSER_TOP_K
 from src.common.trace_utils import load_jsonl_dict_rows
 from src.analytics.explainability_report import generate_explainability_report
 from src.ui.stock_logos import get_logo_url
@@ -902,6 +902,54 @@ if not portfolio.empty:
             st.info("No position P/L snapshot available yet.")
 else:
     st.info("No portfolio data yet — worker has not run.")
+
+st.subheader("Loser Hunter Radar")
+st.caption(
+    f"Mode: {'ON' if LOSER_HUNTER_ENABLED else 'OFF'} | "
+    f"min drop filter: -{100.0 * float(LOSER_MIN_DROP_PCT):.1f}% | "
+    f"target universe size: top {int(LOSER_TOP_K)} losers"
+)
+if not signals.empty and {"mover_bucket", "daily_return", "ticker"}.issubset(signals.columns):
+    loser_view = signals.copy()
+    loser_view["mover_bucket"] = loser_view["mover_bucket"].astype(str).str.upper()
+    loser_view = loser_view[loser_view["mover_bucket"] == "LOSER"].copy()
+    if "daily_return" in loser_view.columns:
+        loser_view["daily_return_pct"] = loser_view["daily_return"].astype(float) * 100.0
+    loser_view = loser_view.sort_values("daily_return_pct", ascending=True)
+    loser_cols = [c for c in ["ticker", "decision", "score", "daily_return_pct", "signal_confidence", "price", "time"] if c in loser_view.columns]
+    if loser_cols:
+        lv = loser_view[loser_cols].head(20).copy()
+        if "score" in lv.columns:
+            lv["score"] = lv["score"].map(lambda v: f"{float(v):.3f}")
+        if "daily_return_pct" in lv.columns:
+            lv["daily_return_pct"] = lv["daily_return_pct"].map(lambda v: f"{float(v):+.2f}%")
+        if "price" in lv.columns:
+            lv["price"] = lv["price"].map(lambda v: f"{float(v):.2f}")
+        try:
+            st.dataframe(_style_decision_cols(lv, ["decision"]), use_container_width=True, hide_index=True)
+        except Exception:
+            st.dataframe(lv, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No loser candidates yet.")
+else:
+    st.caption("No signal data yet for loser radar.")
+
+if not positions.empty and {"ticker", "pnl_pct", "market_value"}.issubset(positions.columns):
+    threshold = float(LOSER_PROFIT_ALERT_PCT)
+    hits = positions[positions["pnl_pct"].astype(float) >= threshold].copy()
+    st.caption(f"Profit alerts at +{100.0 * threshold:.1f}% unrealized P/L")
+    if hits.empty:
+        st.caption("No active profit alerts right now.")
+    else:
+        hits["pnl_pct"] = hits["pnl_pct"].astype(float) * 100.0
+        alert_cols = [c for c in ["ticker", "pnl_pct", "market_value", "current_price", "avg_cost"] if c in hits.columns]
+        display_hits = hits[alert_cols].sort_values("pnl_pct", ascending=False)
+        if "pnl_pct" in display_hits.columns:
+            display_hits["pnl_pct"] = display_hits["pnl_pct"].map(lambda v: f"{float(v):.2f}%")
+        for c in ["market_value", "current_price", "avg_cost"]:
+            if c in display_hits.columns:
+                display_hits[c] = display_hits[c].map(lambda v: f"{float(v):.2f}")
+        st.dataframe(display_hits, use_container_width=True, hide_index=True)
 
 st.subheader("S&P 500 Movers Signals (Top Losers/Gainers)")
 if not signals.empty:
