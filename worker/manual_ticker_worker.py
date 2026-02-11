@@ -103,6 +103,12 @@ def _upsert_result(conn, payload: dict, now_ts_text: str):
     c.close()
 
 
+def _delete_ticker_row(conn, ticker: str):
+    c = conn.cursor()
+    c.execute("DELETE FROM manual_ticker_checks WHERE ticker = %s", (str(ticker).upper(),))
+    c.close()
+
+
 def _replace_oldest_ticker(conn, old_ticker: str, new_ticker: str, payload: dict, now_ts_text: str):
     c = conn.cursor()
     c.execute(
@@ -172,6 +178,10 @@ def main():
         now_ts_text = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
         for ticker in tracked_tickers:
             payload = _evaluate_ticker(ticker)
+            if str(payload.get("decision", "")).upper() == "ERROR":
+                _delete_ticker_row(conn, ticker)
+                print(f"[manual-worker] {ticker} removed from watchlist (decision=ERROR reason={payload['reason']})")
+                continue
             _upsert_result(conn, payload, now_ts_text)
             print(
                 "[manual-worker] "
