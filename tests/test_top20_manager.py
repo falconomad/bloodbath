@@ -321,6 +321,97 @@ class Top20ManagerTests(unittest.TestCase):
         )
         self.assertLessEqual(tech_value, 250.0 + 1e-6)
 
+    def test_daily_loss_cap_liquidates_and_blocks_new_buys(self):
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=2,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=1,
+            max_daily_loss_pct=0.05,
+        )
+        manager.step([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "price": 100.0}])
+        self.assertIn("AAA", manager.holdings)
+
+        # 20% drawdown should trigger the daily loss kill-switch.
+        manager.step([{"ticker": "AAA", "decision": "HOLD", "score": 0.0, "price": 80.0}])
+        self.assertNotIn("AAA", manager.holdings)
+
+        # Same day: should remain blocked from opening new risk.
+        manager.step([{"ticker": "BBB", "decision": "BUY", "score": 2.0, "price": 50.0}])
+        self.assertNotIn("BBB", manager.holdings)
+
+    def test_buy_requires_min_risk_reward_ratio(self):
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=1,
+            min_risk_reward_ratio=2.0,
+        )
+        manager.step(
+            [
+                {
+                    "ticker": "AAA",
+                    "decision": "BUY",
+                    "score": 2.0,
+                    "price": 100.0,
+                    "expected_return_10d": 0.10,  # RR ~= 0.83 versus 12% stop
+                }
+            ]
+        )
+        self.assertNotIn("AAA", manager.holdings)
+
+    def test_buy_blocks_highly_correlated_candidate(self):
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=1,
+            max_allocation_per_position=1.0,
+            buy_confirm_steps=1,
+            max_portfolio_correlation=0.60,
+        )
+        manager.step(
+            [
+                {
+                    "ticker": "AAA",
+                    "decision": "BUY",
+                    "score": 2.0,
+                    "price": 100.0,
+                    "corr_to_portfolio": 0.92,
+                }
+            ]
+        )
+        self.assertNotIn("AAA", manager.holdings)
+
+    def test_rebalance_trims_overweight_position(self):
+        manager = Top20AutoManager(
+            starting_capital=1000,
+            max_positions=2,
+            max_allocation_per_position=0.50,
+            rebalance_tolerance=0.01,
+            take_profit_pct=10.0,
+            buy_confirm_steps=1,
+        )
+        manager.step(
+            [
+                {"ticker": "AAA", "decision": "BUY", "score": 3.0, "price": 100.0},
+                {"ticker": "BBB", "decision": "BUY", "score": 1.0, "price": 100.0},
+            ]
+        )
+        shares_before = float(manager.holdings["AAA"]["shares"])
+        # Inflate AAA so allocation breaches cap and must be trimmed.
+        manager.step(
+            [
+                {"ticker": "AAA", "decision": "HOLD", "score": 0.0, "price": 300.0},
+                {"ticker": "BBB", "decision": "HOLD", "score": 0.0, "price": 100.0},
+            ]
+        )
+        shares_after = float(manager.holdings["AAA"]["shares"])
+        self.assertLess(shares_after, shares_before)
+
+        tx = manager.transactions_df()
+        rebalance_sells = tx[(tx["ticker"] == "AAA") & (tx["action"] == "SELL_REBALANCE")]
+        self.assertFalse(rebalance_sells.empty)
+
 
 if __name__ == "__main__":
     unittest.main()

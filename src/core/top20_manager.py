@@ -29,6 +29,10 @@ class Top20AutoManager:
         rotation_min_score_gap=0.15,
         rotation_sell_fraction=0.35,
         rotation_max_swaps_per_step=1,
+        max_daily_loss_pct=0.05,
+        min_risk_reward_ratio=1.5,
+        rebalance_tolerance=0.02,
+        max_portfolio_correlation=0.85,
     ):
         self.cash = float(starting_capital)
         self.max_positions = int(max_positions)
@@ -53,6 +57,10 @@ class Top20AutoManager:
         self.rotation_min_score_gap = float(rotation_min_score_gap)
         self.rotation_sell_fraction = float(rotation_sell_fraction)
         self.rotation_max_swaps_per_step = int(rotation_max_swaps_per_step)
+        self.max_daily_loss_pct = float(max_daily_loss_pct)
+        self.min_risk_reward_ratio = float(min_risk_reward_ratio)
+        self.rebalance_tolerance = float(rebalance_tolerance)
+        self.max_portfolio_correlation = float(max_portfolio_correlation)
         # ticker -> {"shares": float, "avg_cost": float, "peak_price": float}
         self.holdings = {}
         self.last_price_by_ticker = {}
@@ -62,6 +70,9 @@ class Top20AutoManager:
         self.step_index = 0
         self.history = []
         self.transactions = []
+        self._current_day = None
+        self._day_start_equity = None
+        self._daily_loss_triggered = False
 
     def _record(self, timestamp, ticker, action, shares, price):
         self.transactions.append(
@@ -81,11 +92,53 @@ class Top20AutoManager:
         score = max(float(candidate.get("score", 0.0)), 0.0)
         sentiment = float(candidate.get("sentiment", 0.0))
         growth = float(candidate.get("growth_20d", 0.0))
+        atr_pct = max(float(candidate.get("atr_pct", 0.0)), 0.0)
 
         # Blend conviction (score), sentiment, and recent growth into a positive weight.
         sentiment_factor = max(0.6, min(1.4, 1.0 + (0.30 * sentiment)))
         growth_factor = max(0.7, min(1.5, 1.0 + (0.80 * growth)))
-        return max(score * sentiment_factor * growth_factor, 1e-6)
+        # Vol-adjusted sizing: higher volatility gets a smaller size.
+        volatility_factor = 1.0 / (1.0 + (4.0 * atr_pct))
+        volatility_factor = max(0.35, min(1.15, volatility_factor))
+        return max(score * sentiment_factor * growth_factor * volatility_factor, 1e-6)
+
+    def _stop_pct_for(self, atr_pct):
+        atr_pct = max(float(atr_pct), 0.0)
+        if atr_pct > 0:
+            return max(self.stop_loss_pct * 0.5, min(0.35, atr_pct * self.trailing_atr_mult))
+        return self.stop_loss_pct
+
+    def _risk_reward_ratio(self, candidate):
+        stop_pct = self._stop_pct_for(float(candidate.get("atr_pct", 0.0)))
+        expected_upside = float(
+            candidate.get("expected_return_10d", candidate.get("expected_return", self.take_profit_pct))
+        )
+        if expected_upside <= 0:
+            return 0.0
+        return expected_upside / max(stop_pct, 1e-6)
+
+    def _rebalance_positions(self, timestamp, analysis_by_ticker):
+        if not self.holdings:
+            return
+        equity = self._portfolio_value()
+        if equity <= 0:
+            return
+        max_allocation = self.max_allocation_per_position + self.rebalance_tolerance
+        for ticker in list(self.holdings.keys()):
+            price = float(self.last_price_by_ticker.get(ticker, self.holdings[ticker].get("avg_cost", 0.0)))
+            if not self._is_valid_price(price):
+                continue
+            market_value = float(self.holdings[ticker]["shares"]) * price
+            allocation = market_value / equity
+            if allocation <= max_allocation:
+                continue
+            target_value = equity * self.max_allocation_per_position
+            excess_value = max(market_value - target_value, 0.0)
+            if excess_value <= 0:
+                continue
+            fraction_to_trim = max(min(excess_value / market_value, 0.95), 0.0)
+            if fraction_to_trim > 0:
+                self._sell_fraction(timestamp, ticker, price, fraction_to_trim, action="SELL_REBALANCE")
 
     def _buy(self, timestamp, ticker, price, budget, sector=None):
         if not self._is_valid_price(price) or budget <= 0 or self.cash <= 0:
@@ -221,7 +274,12 @@ class Top20AutoManager:
             )
 
         snapshot_time = timestamp or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        equity = self._portfolio_value()
+        total_positions_value = 0.0
+        for ticker, position in self.holdings.items():
+            shares = float(position["shares"])
+            avg_cost = float(position["avg_cost"])
+            current_price = float(self.last_price_by_ticker.get(ticker, avg_cost))
+            total_positions_value += shares * current_price
         rows = []
         for ticker, position in self.holdings.items():
             shares = float(position["shares"])
@@ -230,7 +288,7 @@ class Top20AutoManager:
             market_value = shares * current_price
             cost_basis = shares * avg_cost
             pnl = market_value - cost_basis
-            allocation = (market_value / equity) if equity > 0 else 0.0
+            allocation = (market_value / total_positions_value) if total_positions_value > 0 else 0.0
             pnl_pct = (pnl / cost_basis) if cost_basis > 0 else 0.0
 
             rows.append(
@@ -257,6 +315,11 @@ class Top20AutoManager:
             return
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_day = timestamp[:10]
+        if current_day != self._current_day:
+            self._current_day = current_day
+            self._day_start_equity = self._portfolio_value()
+            self._daily_loss_triggered = False
 
         for analysis in analyses:
             price = float(analysis["price"])
@@ -264,6 +327,21 @@ class Top20AutoManager:
                 self.last_price_by_ticker[analysis["ticker"]] = price
 
         analysis_by_ticker = {a["ticker"]: a for a in analyses}
+        equity_before_actions = self._portfolio_value()
+        if self._day_start_equity is None:
+            self._day_start_equity = equity_before_actions
+        if self._day_start_equity > 0:
+            daily_drawdown = (self._day_start_equity - equity_before_actions) / self._day_start_equity
+            if daily_drawdown >= self.max_daily_loss_pct:
+                self._daily_loss_triggered = True
+
+        if self._daily_loss_triggered:
+            for ticker in list(self.holdings.keys()):
+                price = float(self.last_price_by_ticker.get(ticker, self.holdings[ticker].get("avg_cost", 0.0)))
+                if self._is_valid_price(price):
+                    self._sell_all(timestamp, ticker, price)
+            self.history.append(self._portfolio_value())
+            return
 
         # 1) Risk-first exits: explicit SELL, stop-loss, and take-profit.
         for ticker in list(self.holdings.keys()):
@@ -277,9 +355,7 @@ class Top20AutoManager:
                 position["peak_price"] = max(float(position.get("peak_price", price)), price)
             position.setdefault("tp1_taken", False)
 
-            trailing_stop_pct = self.stop_loss_pct
-            if atr_pct > 0:
-                trailing_stop_pct = max(self.stop_loss_pct * 0.5, min(0.35, atr_pct * self.trailing_atr_mult))
+            trailing_stop_pct = self._stop_pct_for(atr_pct)
             trailing_stop = float(position.get("peak_price", price)) * (1 - trailing_stop_pct)
             hard_stop = avg_cost * (1 - self.stop_loss_pct)
 
@@ -326,6 +402,11 @@ class Top20AutoManager:
 
             growth_20d = float(a.get("growth_20d", 0.0))
             if growth_20d > self.max_entry_growth_20d:
+                continue
+            if self._risk_reward_ratio(a) < self.min_risk_reward_ratio:
+                continue
+            corr_to_portfolio = abs(float(a.get("corr_to_portfolio", 0.0)))
+            if corr_to_portfolio > self.max_portfolio_correlation:
                 continue
 
             buy_candidates.append(a)
@@ -389,14 +470,12 @@ class Top20AutoManager:
                 weights = [self._buy_weight(c) for c in new_candidates]
                 total_weight = sum(weights) if weights else 0.0
                 planned_new_budget = exposure_budget_remaining * self.initial_entry_ratio
-                sector_new_counts = {}
                 for candidate, weight in zip(new_candidates, weights):
                     if exposure_budget_remaining <= 0:
                         break
                     sector = self._sector(candidate["ticker"], analysis_by_ticker)
                     current_sector_positions = self._sector_position_count(sector, analysis_by_ticker)
-                    new_sector_positions = sector_new_counts.get(sector, 0)
-                    if (current_sector_positions + new_sector_positions) >= self.max_positions_per_sector:
+                    if current_sector_positions >= self.max_positions_per_sector:
                         continue
                     sector_current_value = self._sector_market_value(sector, analysis_by_ticker)
                     sector_cap_equity = equity * self.max_sector_allocation
@@ -418,8 +497,6 @@ class Top20AutoManager:
                         sector=sector,
                     )
                     exposure_budget_remaining -= spent
-                    if spent > 0:
-                        sector_new_counts[sector] = sector_new_counts.get(sector, 0) + 1
 
             # 3) Opportunistic averaging-up for strong signals if under-allocated.
             for candidate in buy_candidates:
@@ -451,6 +528,7 @@ class Top20AutoManager:
                 spent = self._buy(timestamp, ticker=ticker, price=price, budget=budget, sector=sector)
                 exposure_budget_remaining -= spent
 
+        self._rebalance_positions(timestamp, analysis_by_ticker)
         self.history.append(self._portfolio_value())
 
     def history_df(self):
