@@ -145,6 +145,30 @@ if [[ ! -f "$CANDIDATE_PATH" ]]; then
   exit 1
 fi
 
+POS_RATE="$($PYTHON_BIN - <<PY
+import json
+from pathlib import Path
+obj = json.loads(Path("$CANDIDATE_METRICS_PATH").read_text(encoding="utf-8"))
+cand = (obj.get("best_saved") or obj)
+rate = float((((cand.get("classification") or {}).get("positive_rate_test", 0.0)) or 0.0))
+print(rate)
+PY
+)"
+
+if [[ "$FORCE_PROMOTE" -ne 1 ]]; then
+  TOO_LOW="$($PYTHON_BIN - <<PY
+rate = float("$POS_RATE")
+print("yes" if rate <= 0.0 else "no")
+PY
+)"
+  if [[ "$TOO_LOW" == "yes" ]]; then
+    rm -f "$CANDIDATE_PATH"
+    rm -f "$CANDIDATE_METRICS_PATH"
+    echo "[retrain] skipped promotion: test positive rate is zero (likely low-signal dataset period)"
+    exit 0
+  fi
+fi
+
 PROMOTE=1
 REASON="first_model"
 

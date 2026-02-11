@@ -50,3 +50,8 @@ Model Retraining Loop:
 - The retrain script now searches multiple candidates automatically:
   - horizons: `5,10,20`
   - models: `random_forest,gradient_boosting`
+- It now skips promotion automatically when holdout positive-rate is zero (to avoid promoting models trained on a no-signal window).
+
+Data/Label Diagnostics:
+
+- `./.venv/bin/python scripts/model_diagnostics.py --trace logs/recommendation_trace.jsonl --horizons 5,10,20`
