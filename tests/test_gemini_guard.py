@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 from src.execution.gemini_guard import GeminiGuard
 
@@ -52,6 +53,20 @@ class GeminiGuardTests(unittest.TestCase):
             analyses = [{"ticker": "AAA", "decision": "BUY", "score": 1.1, "position_size": 0.2, "decision_reasons": []}]
             out = guard.apply(analyses)
             self.assertAlmostEqual(float(out[0]["position_size"]), 0.08, places=6)
+
+    def test_cooldown_blocks_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            guard = _FakeGeminiGuard(
+                api_key="x",
+                max_calls_per_cycle=1,
+                max_calls_per_day=50,
+                state_path=str(Path(tmp) / "gemini_state.json"),
+            )
+            guard._state["date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            guard._state["cooldown_until"] = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+            guard._save_state()
+            out = guard.apply([{"ticker": "AAA", "decision": "BUY", "score": 2.0, "position_size": 0.2, "decision_reasons": []}])
+            self.assertEqual(out[0]["decision"], "BUY")
 
 
 if __name__ == "__main__":

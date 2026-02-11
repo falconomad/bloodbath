@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +25,18 @@ class GeminiGuard:
         self.timeout_seconds = float(timeout_seconds)
         self.state_path = Path(state_path)
         self._state = self._load_state()
+        self._base_daily_cap = self._default_daily_cap(self.model)
 
     def enabled(self) -> bool:
         return bool(self.api_key) and self.max_calls_per_cycle > 0 and self.max_calls_per_day > 0
+
+    def _default_daily_cap(self, model: str) -> int:
+        m = str(model or "").lower()
+        if "flash-lite" in m:
+            return 100
+        if "flash" in m:
+            return 60
+        return 30
 
     def _load_state(self) -> dict[str, Any]:
         if not self.state_path.exists():
@@ -43,15 +52,36 @@ class GeminiGuard:
         self.state_path.write_text(json.dumps(self._state, indent=2, sort_keys=True), encoding="utf-8")
 
     def _can_call(self) -> bool:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now = datetime.now(timezone.utc)
+        today = now.strftime("%Y-%m-%d")
         if str(self._state.get("date", "")) != today:
             self._state["date"] = today
             self._state["calls_today"] = 0
-        return int(self._state.get("calls_today", 0)) < self.max_calls_per_day
+            self._state["dynamic_daily_cap"] = self._base_daily_cap
+            self._state.pop("cooldown_until", None)
+        cooldown_until = str(self._state.get("cooldown_until", "") or "").strip()
+        if cooldown_until:
+            try:
+                if now < datetime.fromisoformat(cooldown_until):
+                    return False
+            except Exception:
+                pass
+        dynamic_cap = int(self._state.get("dynamic_daily_cap", self._base_daily_cap) or self._base_daily_cap)
+        hard_cap = min(self.max_calls_per_day, dynamic_cap)
+        return int(self._state.get("calls_today", 0)) < hard_cap
 
     def _record_call(self) -> None:
         self._state["calls_today"] = int(self._state.get("calls_today", 0)) + 1
         self._state["last_call_ts"] = datetime.now(timezone.utc).isoformat()
+        self._save_state()
+
+    def _record_rate_limit(self) -> None:
+        now = datetime.now(timezone.utc)
+        current = int(self._state.get("dynamic_daily_cap", self._base_daily_cap) or self._base_daily_cap)
+        reduced = max(int(current * 0.8), 5)
+        self._state["dynamic_daily_cap"] = reduced
+        self._state["cooldown_until"] = (now.replace(microsecond=0) + timedelta(minutes=20)).isoformat()
+        self._state["last_rate_limit_ts"] = now.isoformat()
         self._save_state()
 
     def _prompt_for(self, row: dict[str, Any]) -> str:
@@ -110,12 +140,10 @@ class GeminiGuard:
             "contents": [{"parts": [{"text": self._prompt_for(row)}]}],
             "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
         }
-        resp = requests.post(
-            url,
-            params={"key": self.api_key},
-            json=body,
-            timeout=self.timeout_seconds,
-        )
+        resp = requests.post(url, params={"key": self.api_key}, json=body, timeout=self.timeout_seconds)
+        if resp.status_code == 429:
+            self._record_rate_limit()
+            return None
         resp.raise_for_status()
         self._record_call()
         text = self._extract_text(resp.json() or {})
@@ -127,7 +155,8 @@ class GeminiGuard:
         out = [dict(x) for x in analyses]
         buys = [x for x in out if str(x.get("decision", "HOLD")).upper() == "BUY"]
         buys.sort(key=lambda r: float(r.get("score", 0.0)), reverse=True)
-        budget = min(self.max_calls_per_cycle, len(buys))
+        # Keep per-cycle usage tiny on free tier; dynamic daily cap handles broader throttling.
+        budget = min(self.max_calls_per_cycle, 1, len(buys))
         for row in buys[:budget]:
             try:
                 verdict = self._gemini_check(row)
