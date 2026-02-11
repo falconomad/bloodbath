@@ -480,6 +480,17 @@ def _load_latest_experiment_result():
         return None
 
 
+def _load_execution_guard_state(path: str = "logs/execution_guard_state.json") -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
 def _with_logo_column(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty or "ticker" not in df.columns:
         return df
@@ -1081,6 +1092,26 @@ if trace_for_monitor:
         )
         qfig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), paper_bgcolor=card, plot_bgcolor=card)
         st.plotly_chart(qfig, use_container_width=True)
+
+st.subheader("Safeguard Status")
+guard_state = _load_execution_guard_state()
+if not guard_state:
+    st.caption("No safeguard state file found yet.")
+else:
+    consecutive_failures = int(guard_state.get("consecutive_failures", 0) or 0)
+    last_failure_reason = str(guard_state.get("last_failure_reason", "") or "-")
+    last_failure_ts = str(guard_state.get("last_failure_ts", "") or "-")
+    turnover_history = guard_state.get("turnover_history", []) or []
+    latest_turnover = float(turnover_history[-1]) if turnover_history else 0.0
+    avg_turnover = float(sum(turnover_history) / len(turnover_history)) if turnover_history else 0.0
+
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Consecutive Step Failures", f"{consecutive_failures}")
+    s2.metric("Latest Cycle Turnover", f"{latest_turnover:.3f}")
+    s3.metric("Average Turnover", f"{avg_turnover:.3f}")
+    s4.metric("Circuit Breaker", "ACTIVE" if consecutive_failures > 0 else "IDLE")
+    st.caption(f"Last failure time: {last_failure_ts}")
+    st.caption(f"Last failure reason: {last_failure_reason}")
 
 st.subheader("Engine Flow Reference")
 st.caption("End-to-end trading engine flow (from data fetch to portfolio updates).")
