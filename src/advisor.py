@@ -403,3 +403,47 @@ def run_top20_cycle_with_signals():
 def run_top20_cycle():
     history, transactions, positions, _analyses = run_top20_cycle_with_signals()
     return history, transactions, positions
+
+
+def run_manual_ticker_check(ticker: str):
+    symbol = str(ticker or "").strip().upper().replace(".", "-")
+    if not symbol:
+        return {"ticker": "", "error": "missing_ticker"}
+
+    data = get_price_data(symbol, period="6mo", interval="1d")
+    if data is None or data.empty:
+        return {"ticker": symbol, "error": "price_data_unavailable"}
+
+    headlines = get_company_news(symbol, structured=True)
+    dip_score, drawdown, stabilized, volatility_penalty = dip_bonus(data)
+    dip_meta = {
+        "dip_score": dip_score,
+        "drawdown": drawdown,
+        "stabilized": stabilized,
+        "volatility_penalty": volatility_penalty,
+    }
+    candidate_ctx = {symbol: {"data": data}}
+    rec = generate_recommendation_core(
+        ticker=symbol,
+        data=data,
+        headlines=headlines,
+        dip_meta=dip_meta,
+        cycle_idx=max(int(_CYCLE_INDEX), 1),
+        apply_stability_gate=True,
+        cfg=SCORING_CONFIG,
+        decision_state={},
+        portfolio_context=_portfolio_risk_context_for_ticker(symbol, [], candidate_ctx),
+        market_news=get_market_sentiment_news(limit=12),
+    )
+    price = _as_float(data["Close"].iloc[-1])
+    return {
+        "ticker": symbol,
+        "decision": str(rec.get("decision", "HOLD")).upper(),
+        "score": round(float(rec.get("composite_score", 0.0)), 4),
+        "price": float(price),
+        "signal_confidence": round(float(rec.get("signal_confidence", 0.0)), 4),
+        "sentiment": round(float(rec.get("sentiment", 0.0)), 4),
+        "growth_20d": round(_recent_growth_score(data, lookback=20), 4),
+        "atr_pct": round(atr_percent(data, period=14), 5),
+        "decision_reasons": rec.get("decision_reasons", []),
+    }

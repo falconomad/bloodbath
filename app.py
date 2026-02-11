@@ -10,7 +10,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
-from src.settings import TOP20_STARTING_CAPITAL
+from src.settings import MANUAL_CHECK_TICKER, TOP20_STARTING_CAPITAL
 from src.common.trace_utils import load_jsonl_dict_rows
 from src.analytics.explainability_report import generate_explainability_report
 from src.ui.stock_logos import get_logo_url
@@ -674,11 +674,21 @@ if db_ready:
             """,
             conn,
         )
+        manual_checks = pd.read_sql(
+            """
+            SELECT *
+            FROM manual_ticker_checks
+            ORDER BY id DESC
+            LIMIT 200
+            """,
+            conn,
+        )
     except Exception:
         portfolio = pd.DataFrame()
         transactions = pd.DataFrame()
         positions = pd.DataFrame()
         signals = pd.DataFrame()
+        manual_checks = pd.DataFrame()
     finally:
         conn.close()
 else:
@@ -686,6 +696,7 @@ else:
     transactions = pd.DataFrame()
     positions = pd.DataFrame()
     signals = pd.DataFrame()
+    manual_checks = pd.DataFrame()
 
 skeleton_placeholder.empty()
 
@@ -938,6 +949,29 @@ if not signals.empty:
         st.plotly_chart(sig_fig, use_container_width=True)
 else:
     st.caption("No latest signal data yet.")
+
+st.subheader("Manual Ticker Check (ENV)")
+if MANUAL_CHECK_TICKER:
+    if manual_checks.empty:
+        st.caption("No manual worker results yet. Trigger the manual ticker worker from GitHub Actions.")
+    else:
+        scoped = manual_checks[manual_checks["ticker"].astype(str).str.upper() == MANUAL_CHECK_TICKER].copy()
+        if scoped.empty:
+            st.caption(
+                f"No saved manual check found for `{MANUAL_CHECK_TICKER}`. "
+                "Trigger the manual ticker worker and pass the same ticker."
+            )
+            scoped = manual_checks.head(1).copy()
+        else:
+            scoped = scoped.head(1).copy()
+        manual_df = scoped[["time", "ticker", "decision", "reason", "score", "price", "signal_confidence"]].copy()
+        manual_df["score"] = manual_df["score"].map(lambda v: f"{float(v):.3f}")
+        manual_df["price"] = manual_df["price"].map(lambda v: f"{float(v):.2f}")
+        manual_df["signal_confidence"] = manual_df["signal_confidence"].map(lambda v: f"{float(v):.3f}")
+        st.caption(f"Source: MANUAL_CHECK_TICKER={MANUAL_CHECK_TICKER}")
+        st.dataframe(_style_decision_cols(manual_df, ["decision"]), use_container_width=True, hide_index=True)
+else:
+    st.caption("Set `MANUAL_CHECK_TICKER` in ENV (example: `U`) and trigger manual ticker worker in GitHub Actions.")
 
 with st.expander("Transaction History", expanded=False):
     if not transactions.empty:

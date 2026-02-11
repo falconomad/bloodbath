@@ -119,6 +119,21 @@ def init_db():
     """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS manual_ticker_checks (
+            id BIGSERIAL PRIMARY KEY,
+            time TEXT,
+            ticker TEXT,
+            decision TEXT,
+            reason TEXT,
+            score REAL,
+            price REAL,
+            signal_confidence REAL
+        );
+    """
+    )
+
 
     # Migration for fractional shares support.
     cur.execute("ALTER TABLE transactions ALTER COLUMN shares TYPE REAL USING shares::REAL;")

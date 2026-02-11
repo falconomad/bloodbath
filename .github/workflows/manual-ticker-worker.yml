@@ -1,0 +1,42 @@
+name: Manual Ticker Check Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Optional ticker override (e.g., U). If empty, uses MANUAL_CHECK_TICKER env."
+        required: false
+        default: ""
+
+jobs:
+  run-manual-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+      X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+      MANUAL_CHECK_TICKER: ${{ vars.MANUAL_CHECK_TICKER }}
+      MANUAL_CHECK_TICKER_INPUT: ${{ github.event.inputs.ticker }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: worker/requirements-worker.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --disable-pip-version-check --no-input -r worker/requirements-worker.txt
+
+      - name: Run manual ticker worker
+        run: |
+          python worker/manual_ticker_worker.py

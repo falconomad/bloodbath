@@ -20,6 +20,14 @@ class SettingsTests(unittest.TestCase):
         importlib.reload(settings)
         self.assertEqual(settings.TOP20_STARTING_CAPITAL, 750.0)
 
+    def test_manual_check_ticker_normalizes_env_value(self):
+        os.environ["MANUAL_CHECK_TICKER"] = "  u  "
+
+        import src.settings as settings
+
+        importlib.reload(settings)
+        self.assertEqual(settings.MANUAL_CHECK_TICKER, "U")
+
 
 if __name__ == "__main__":
     unittest.main()

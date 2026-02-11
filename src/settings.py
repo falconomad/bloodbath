@@ -65,3 +65,6 @@ FETCH_BATCH_SIZE = _int_from_env("FETCH_BATCH_SIZE", 20)
 
 # Optional execution aggressiveness control (default off for safety).
 ENABLE_POSITION_ROTATION = _bool_from_env("ENABLE_POSITION_ROTATION", False)
+
+# Optional manual ticker probe shown as a separate dashboard section.
+MANUAL_CHECK_TICKER = _str_from_env("MANUAL_CHECK_TICKER", "").strip().upper()

@@ -96,6 +96,28 @@ class AdvisorSignalTests(unittest.TestCase):
         self.assertEqual(candidates["DDD"]["mover_bucket"], "GAINER")
         self.assertEqual(candidates["EEE"]["mover_bucket"], "GAINER")
 
+    def test_run_manual_ticker_check_returns_decision_and_reasons(self):
+        data = pd.DataFrame({"Close": [100.0, 103.0], "High": [101.0, 104.0], "Low": [99.0, 102.0]})
+        with patch("src.advisor.get_price_data", return_value=data), patch(
+            "src.advisor.get_company_news", return_value=[]
+        ), patch(
+            "src.advisor.get_market_sentiment_news", return_value=[]
+        ), patch(
+            "src.advisor.generate_recommendation_core",
+            return_value={
+                "decision": "BUY",
+                "composite_score": 0.8123,
+                "signal_confidence": 0.77,
+                "sentiment": 0.1,
+                "decision_reasons": ["confidence:strong"],
+            },
+        ):
+            out = advisor.run_manual_ticker_check("u")
+
+        self.assertEqual(out["ticker"], "U")
+        self.assertEqual(out["decision"], "BUY")
+        self.assertEqual(out["decision_reasons"], ["confidence:strong"])
+
 
 if __name__ == "__main__":
     unittest.main()
