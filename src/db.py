@@ -69,7 +69,9 @@ def init_db():
             ticker TEXT,
             decision TEXT,
             score REAL,
-            price REAL
+            price REAL,
+            mover_bucket TEXT,
+            daily_return REAL
         );
     """
     )
@@ -121,6 +123,8 @@ def init_db():
     # Migration for fractional shares support.
     cur.execute("ALTER TABLE transactions ALTER COLUMN shares TYPE REAL USING shares::REAL;")
     cur.execute("ALTER TABLE position_snapshots ALTER COLUMN shares TYPE REAL USING shares::REAL;")
+    cur.execute("ALTER TABLE recommendation_signals ADD COLUMN IF NOT EXISTS mover_bucket TEXT;")
+    cur.execute("ALTER TABLE recommendation_signals ADD COLUMN IF NOT EXISTS daily_return REAL;")
 
     conn.commit()
     cur.close()

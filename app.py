@@ -863,11 +863,15 @@ if not portfolio.empty:
 else:
     st.info("No portfolio data yet — worker has not run.")
 
-st.subheader("Top Signals (Closest to Trade Trigger)")
+st.subheader("S&P 500 Movers Signals (Top Losers/Gainers)")
 if not signals.empty:
     signal_view = signals.copy()
     if "decision" in signal_view.columns:
         signal_view["decision"] = signal_view["decision"].astype(str).str.upper()
+    if "mover_bucket" in signal_view.columns:
+        signal_view["mover_bucket"] = signal_view["mover_bucket"].astype(str).str.upper()
+    if "daily_return" in signal_view.columns:
+        signal_view["daily_return_pct"] = signal_view["daily_return"].astype(float) * 100.0
     signal_view["distance_to_trigger"] = signal_view["score"].apply(lambda v: abs(v - 1) if v >= 0 else abs(v + 1))
     signal_view = _with_logo_column(signal_view)
     if "ticker" in signal_view.columns:
@@ -881,7 +885,9 @@ if not signals.empty:
             "logo",
             "ticker",
             "decision",
+            "mover_bucket",
             "score",
+            "daily_return_pct",
             "why",
             "trend",
             "sent",
@@ -903,6 +909,8 @@ if not signals.empty:
         signal_display = signal_table.copy()
         if "score" in signal_display.columns:
             signal_display["score"] = signal_display["score"].map(lambda v: f"{float(v):.3f}")
+        if "daily_return_pct" in signal_display.columns:
+            signal_display["daily_return_pct"] = signal_display["daily_return_pct"].map(lambda v: f"{float(v):+.2f}%")
         if "price" in signal_display.columns:
             signal_display["price"] = signal_display["price"].map(lambda v: f"{float(v):.2f}")
         if "distance_to_trigger" in signal_display.columns:
@@ -922,8 +930,8 @@ if not signals.empty:
             signal_chart_df,
             x="ticker",
             y="score",
-            color="decision" if "decision" in signal_chart_df.columns else None,
-            title="Signal Score Snapshot",
+            color="mover_bucket" if "mover_bucket" in signal_chart_df.columns else ("decision" if "decision" in signal_chart_df.columns else None),
+            title="Signal Score by Mover Bucket",
             template=plot_template,
         )
         sig_fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=10), paper_bgcolor=bg, plot_bgcolor=bg)

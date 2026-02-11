@@ -87,13 +87,19 @@ def save(history, transactions, positions, analyses):
         c.execute("DELETE FROM recommendation_signals")
         for a in analyses:
             c.execute(
-                "INSERT INTO recommendation_signals (time, ticker, decision, score, price) VALUES (%s, %s, %s, %s, %s)",
+                """
+                INSERT INTO recommendation_signals (
+                    time, ticker, decision, score, price, mover_bucket, daily_return
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
                 (
                     datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S"),
                     a["ticker"],
                     a["decision"],
                     float(a["score"]),
                     float(a["price"]),
+                    str(a.get("mover_bucket", "OTHER")),
+                    float(a.get("daily_return", 0.0)),
                 ),
             )
 
