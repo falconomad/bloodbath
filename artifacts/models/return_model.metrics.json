@@ -1,0 +1,24 @@
+{
+  "artifact_path": "/Users/appucyriac/Projects/bloodbath/artifacts/models/return_model.candidate.pkl",
+  "classification": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "roc_auc": 0.5
+  },
+  "examples": 756,
+  "horizon": 5,
+  "model_family": "random_forest",
+  "profit": {
+    "avg_trade_expectancy": 0.0,
+    "buy_hold_total_return": 0.0,
+    "profit_factor": 0.0,
+    "strategy_total_return": 0.0,
+    "trades": 0.0
+  },
+  "regression": {
+    "rmse": 0.0002726636500604288
+  },
+  "status": "ok",
+  "test_examples": 152,
+  "train_examples": 604
+}
