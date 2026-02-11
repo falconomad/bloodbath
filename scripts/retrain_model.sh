@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
 
 TRACE_PATH="$ROOT_DIR/logs/recommendation_trace.jsonl"
+TRAIN_TRACE_PATH="$ROOT_DIR/artifacts/models/combined_training_trace.jsonl"
+EXTERNAL_DATA_DIR="$ROOT_DIR/data/external/alpaca_daily"
+EXTERNAL_TRACE_PATH="$ROOT_DIR/artifacts/models/external_trace.jsonl"
 MODEL_DIR="$ROOT_DIR/artifacts/models"
 MODEL_PATH="$MODEL_DIR/return_model.pkl"
 METRICS_PATH="$MODEL_DIR/return_model.metrics.json"
@@ -17,6 +20,7 @@ SEARCH_HORIZONS="5,10,20"
 SEARCH_MODELS="random_forest,gradient_boosting"
 EXPORT_DB=1
 FORCE_PROMOTE=0
+USE_EXTERNAL=1
 
 usage() {
   cat <<EOF
@@ -28,6 +32,7 @@ Options:
   --horizons CSV         Search horizons (default: 5,10,20)
   --models CSV           Search model families (default: random_forest,gradient_boosting)
   --trace PATH           Trace jsonl path (default: logs/recommendation_trace.jsonl)
+  --no-external          Disable external Alpaca dataset merge
   --no-export-db         Do not refresh trace from DB
   --force                Promote candidate even if not better
   -h, --help             Show this help
@@ -50,6 +55,8 @@ while [[ $# -gt 0 ]]; do
       SEARCH_MODELS="$2"; shift 2 ;;
     --trace)
       TRACE_PATH="$2"; shift 2 ;;
+    --no-external)
+      USE_EXTERNAL=0; shift ;;
     --no-export-db)
       EXPORT_DB=0; shift ;;
     --force)
@@ -109,9 +116,50 @@ if [[ ! -s "$TRACE_PATH" ]]; then
   exit 1
 fi
 
+# Optional external dataset merge from Alpaca historical CSVs.
+if [[ "$USE_EXTERNAL" -eq 1 && -d "$EXTERNAL_DATA_DIR" ]]; then
+  echo "[retrain] building external trace from $EXTERNAL_DATA_DIR"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/build_external_trace.py" \
+    --input-dir "$EXTERNAL_DATA_DIR" \
+    --output "$EXTERNAL_TRACE_PATH"
+fi
+
+echo "[retrain] preparing combined training trace -> $TRAIN_TRACE_PATH"
+"$PYTHON_BIN" - <<PY
+import json
+from pathlib import Path
+
+base = Path("$TRACE_PATH")
+ext = Path("$EXTERNAL_TRACE_PATH")
+out = Path("$TRAIN_TRACE_PATH")
+out.parent.mkdir(parents=True, exist_ok=True)
+
+seen = set()
+rows = 0
+with out.open("w", encoding="utf-8") as w:
+    for src in [base, ext]:
+        if not src.exists():
+            continue
+        for line in src.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            key = (str(obj.get("ticker", "")).upper(), str(obj.get("ts", "")))
+            if not key[0] or not key[1] or key in seen:
+                continue
+            seen.add(key)
+            w.write(json.dumps(obj, separators=(",", ":")) + "\\n")
+            rows += 1
+print(f"COMBINED_ROWS={rows}")
+PY
+
 echo "[retrain] training candidate model"
 "$PYTHON_BIN" -m src.ml.predictive_model \
-  --trace "$TRACE_PATH" \
+  --trace "$TRAIN_TRACE_PATH" \
   --search \
   --horizons "$SEARCH_HORIZONS" \
   --models "$SEARCH_MODELS" \

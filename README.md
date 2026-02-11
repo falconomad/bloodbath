@@ -51,7 +51,19 @@ Model Retraining Loop:
   - horizons: `5,10,20`
   - models: `random_forest,gradient_boosting`
 - It now skips promotion automatically when holdout positive-rate is zero (to avoid promoting models trained on a no-signal window).
+- It now auto-merges external Alpaca history (if present in `data/external/alpaca_daily`) with DB trace before training.
+- Disable external merge if needed:
+  - `./scripts/retrain_model.sh --no-external`
 
 Data/Label Diagnostics:
 
 - `./.venv/bin/python scripts/model_diagnostics.py --trace logs/recommendation_trace.jsonl --horizons 5,10,20`
+
+Alpaca External Data Ingestion (Free-Tier Safe):
+
+- `./.venv/bin/python scripts/ingest_alpaca_history.py --universe top20 --sleep-sec 0.8 --max-requests 60`
+- Incremental behavior:
+  - per symbol, skips API call if local file is already up-to-date
+  - fetches only missing window from last saved date forward
+- Test plan without credentials/calls:
+  - `./.venv/bin/python scripts/ingest_alpaca_history.py --universe top20 --max-symbols 5 --dry-run`
