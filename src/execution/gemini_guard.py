@@ -26,6 +26,7 @@ class GeminiGuard:
         self.state_path = Path(state_path)
         self._state = self._load_state()
         self._base_daily_cap = self._default_daily_cap(self.model)
+        self.max_tickers_per_request = self._default_batch_size(self.model)
 
     def enabled(self) -> bool:
         return bool(self.api_key) and self.max_calls_per_cycle > 0 and self.max_calls_per_day > 0
@@ -37,6 +38,14 @@ class GeminiGuard:
         if "flash" in m:
             return 60
         return 30
+
+    def _default_batch_size(self, model: str) -> int:
+        m = str(model or "").lower()
+        if "flash-lite" in m:
+            return 4
+        if "flash" in m:
+            return 3
+        return 2
 
     def _load_state(self) -> dict[str, Any]:
         if not self.state_path.exists():
@@ -105,6 +114,29 @@ class GeminiGuard:
             f"decision_reasons={reasons}\n"
         )
 
+    def _prompt_for_many(self, rows: list[dict[str, Any]]) -> str:
+        lines = [
+            "You are a strict risk gate for an automated trading engine.",
+            "Return JSON only with this schema:",
+            '{"verdicts":[{"ticker":"TICKER","action":"ALLOW|BLOCK|REDUCE","confidence":0.0,"reason":"...","size_mult":1.0}]}',
+            "Prefer BLOCK if risk is unclear.",
+            "",
+            "Candidates:",
+        ]
+        for row in rows:
+            decision = str(row.get("decision", "HOLD")).upper()
+            reasons = ", ".join([str(x) for x in (row.get("decision_reasons", []) or [])][:6])
+            lines.append(
+                (
+                    f"- ticker={row.get('ticker','')} decision={decision} score={float(row.get('score',0.0)):.4f} "
+                    f"signal_conf={float(row.get('signal_confidence',0.0)):.4f} atr_pct={float(row.get('atr_pct',0.0)):.5f} "
+                    f"growth_20d={float(row.get('growth_20d',0.0)):.4f} daily_return={float(row.get('daily_return',0.0)):.6f} "
+                    f"sentiment={float(row.get('sentiment',0.0)):.4f} position_size={float(row.get('position_size',0.0)):.4f} "
+                    f"reasons={reasons}"
+                )
+            )
+        return "\n".join(lines)
+
     def _extract_text(self, payload: dict[str, Any]) -> str:
         try:
             candidates = payload.get("candidates", []) or []
@@ -118,7 +150,7 @@ class GeminiGuard:
             return ""
         return ""
 
-    def _parse_json_result(self, text: str) -> dict[str, Any] | None:
+    def _parse_json_result(self, text: str) -> dict[str, Any] | list[dict[str, Any]] | None:
         raw = str(text or "").strip()
         if not raw:
             return None
@@ -126,7 +158,7 @@ class GeminiGuard:
             raw = raw.replace("```json", "").replace("```", "").strip()
         try:
             obj = json.loads(raw)
-            if isinstance(obj, dict):
+            if isinstance(obj, dict) or isinstance(obj, list):
                 return obj
         except Exception:
             return None
@@ -149,39 +181,77 @@ class GeminiGuard:
         text = self._extract_text(resp.json() or {})
         return self._parse_json_result(text)
 
+    def _gemini_check_many(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        if not rows:
+            return []
+        if not self.enabled() or not self._can_call():
+            return None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        body = {
+            "contents": [{"parts": [{"text": self._prompt_for_many(rows)}]}],
+            "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
+        }
+        resp = requests.post(url, params={"key": self.api_key}, json=body, timeout=self.timeout_seconds)
+        if resp.status_code == 429:
+            self._record_rate_limit()
+            return None
+        resp.raise_for_status()
+        self._record_call()
+        text = self._extract_text(resp.json() or {})
+        parsed = self._parse_json_result(text)
+        if isinstance(parsed, dict):
+            verdicts = parsed.get("verdicts", [])
+            if isinstance(verdicts, list):
+                return [x for x in verdicts if isinstance(x, dict)]
+            return []
+        if isinstance(parsed, list):
+            return [x for x in parsed if isinstance(x, dict)]
+        return []
+
     def apply(self, analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not self.enabled():
             return analyses
         out = [dict(x) for x in analyses]
         buys = [x for x in out if str(x.get("decision", "HOLD")).upper() == "BUY"]
         buys.sort(key=lambda r: float(r.get("score", 0.0)), reverse=True)
-        # Keep per-cycle usage tiny on free tier; dynamic daily cap handles broader throttling.
-        budget = min(self.max_calls_per_cycle, 1, len(buys))
-        for row in buys[:budget]:
+        # Free-tier optimization: keep request count tiny; pack multiple tickers per call.
+        request_budget = min(self.max_calls_per_cycle, 1)
+        idx = 0
+        for _ in range(request_budget):
+            batch = buys[idx : idx + max(self.max_tickers_per_request, 1)]
+            if not batch:
+                break
+            idx += len(batch)
             try:
-                verdict = self._gemini_check(row)
+                verdicts = self._gemini_check_many(batch)
             except Exception as exc:
+                for row in batch:
+                    reasons = list(row.get("decision_reasons", []) or [])
+                    reasons.append(f"gemini:error:{type(exc).__name__}")
+                    row["decision_reasons"] = reasons
+                continue
+            if not verdicts:
+                continue
+            by_ticker = {str(v.get("ticker", "")).upper(): v for v in verdicts if str(v.get("ticker", "")).strip()}
+            for row in batch:
+                verdict = by_ticker.get(str(row.get("ticker", "")).upper())
+                if not verdict:
+                    continue
+                action = str(verdict.get("action", "ALLOW")).strip().upper()
+                reason = str(verdict.get("reason", "")).strip()[:120]
+                conf = float(verdict.get("confidence", 0.0) or 0.0)
+                size_mult = float(verdict.get("size_mult", 1.0) or 1.0)
+                size_mult = max(0.0, min(size_mult, 1.0))
                 reasons = list(row.get("decision_reasons", []) or [])
-                reasons.append(f"gemini:error:{type(exc).__name__}")
+                if action == "BLOCK":
+                    row["decision"] = "HOLD"
+                    reasons.append(f"gemini:block:{reason}" if reason else "gemini:block")
+                elif action == "REDUCE":
+                    row["position_size"] = float(row.get("position_size", 0.0)) * size_mult
+                    reasons.append(f"gemini:reduce:{size_mult:.2f}")
+                else:
+                    reasons.append("gemini:allow")
                 row["decision_reasons"] = reasons
-                continue
-            if not verdict:
-                continue
-            action = str(verdict.get("action", "ALLOW")).strip().upper()
-            reason = str(verdict.get("reason", "")).strip()[:120]
-            conf = float(verdict.get("confidence", 0.0) or 0.0)
-            size_mult = float(verdict.get("size_mult", 1.0) or 1.0)
-            size_mult = max(0.0, min(size_mult, 1.0))
-            reasons = list(row.get("decision_reasons", []) or [])
-            if action == "BLOCK":
-                row["decision"] = "HOLD"
-                reasons.append(f"gemini:block:{reason}" if reason else "gemini:block")
-            elif action == "REDUCE":
-                row["position_size"] = float(row.get("position_size", 0.0)) * size_mult
-                reasons.append(f"gemini:reduce:{size_mult:.2f}")
-            else:
-                reasons.append("gemini:allow")
-            row["decision_reasons"] = reasons
-            row["gemini_action"] = action
-            row["gemini_confidence"] = round(conf, 4)
+                row["gemini_action"] = action
+                row["gemini_confidence"] = round(conf, 4)
         return out
