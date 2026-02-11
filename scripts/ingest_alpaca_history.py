@@ -40,8 +40,14 @@ def _load_symbols(args: argparse.Namespace) -> list[str]:
         rows = Path(args.symbol_file).read_text(encoding="utf-8").splitlines()
         return [x.strip().upper() for x in rows if x.strip()]
     if args.universe == "sp500":
-        return [str(x).upper() for x in get_sp500_universe()]
-    return [str(x).upper() for x in TOP20_SECTOR]
+        symbols = [str(x).upper() for x in get_sp500_universe()]
+    else:
+        symbols = [str(x).upper() for x in TOP20_SECTOR]
+    # Always include broad market benchmarks for regime features.
+    for b in ["SPY", "QQQ"]:
+        if b not in symbols:
+            symbols.append(b)
+    return symbols
 
 
 def _alpaca_base_url() -> str:

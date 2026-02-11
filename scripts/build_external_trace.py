@@ -61,7 +61,7 @@ def _rows_from_bars(symbol: str, df: pd.DataFrame, min_rows: int = 40) -> list[d
             "trend": {"value": trend_v, "confidence": 0.8, "quality_ok": True},
             "sentiment": {"value": 0.0, "confidence": 0.0, "quality_ok": False},
             "social": {"value": 0.0, "confidence": 0.0, "quality_ok": False},
-            "market": {"value": 0.0, "confidence": 0.0, "quality_ok": False},
+            "market": {"value": 0.0, "confidence": 0.3, "quality_ok": True},
             "events": {"value": events_v, "confidence": 0.5, "quality_ok": True},
             "micro": {"value": micro_v, "confidence": 0.6, "quality_ok": True},
             "dip": {"value": _norm(-float(ret_5.iloc[i]), 0.08), "confidence": 0.4, "quality_ok": True},
@@ -94,10 +94,62 @@ def _rows_from_bars(symbol: str, df: pd.DataFrame, min_rows: int = 40) -> list[d
                     "event_article_count": 0,
                     "market_regime": "external",
                 },
-                "source": "alpaca_external",
+                "source": "external_history",
             }
         )
     return out
+
+
+def _market_features_by_time(input_dir: Path) -> dict[str, tuple[float, str]]:
+    # Build a simple market context map keyed by day from SPY/QQQ if available.
+    m: dict[str, tuple[float, str]] = {}
+    for bench in ["SPY", "QQQ"]:
+        p = input_dir / f"{bench}.csv"
+        if not p.exists():
+            p = input_dir / f"{bench.lower()}.csv"
+        if not p.exists():
+            continue
+        df = _load_symbol_csv(p)
+        if df.empty or len(df) < 25:
+            continue
+        close = df["close"]
+        ma5 = close.rolling(5).mean()
+        ma20 = close.rolling(20).mean()
+        ret5 = close.pct_change(5).fillna(0.0)
+        for i in range(25, len(df)):
+            ts = df.loc[i, "time"]
+            day = ts.strftime("%Y-%m-%d")
+            trend = _norm(float(((ma5.iloc[i] - ma20.iloc[i]) / ma20.iloc[i]) if ma20.iloc[i] else 0.0), 0.03)
+            if abs(trend) < 0.15:
+                regime = "sideways"
+            elif trend > 0:
+                regime = "bull"
+            else:
+                regime = "bear"
+            score = 0.7 * trend + 0.3 * _norm(float(ret5.iloc[i]), 0.08)
+            prev = m.get(day)
+            if prev is None:
+                m[day] = (score, regime)
+            else:
+                m[day] = ((prev[0] + score) / 2.0, prev[1])
+    return m
+
+
+def _inject_market_context(rows: list[dict], market_map: dict[str, tuple[float, str]]) -> None:
+    for row in rows:
+        ts = str(row.get("ts", ""))
+        day = ts[:10] if len(ts) >= 10 else ""
+        market_score, regime = market_map.get(day, (0.0, "external"))
+        signals = row.get("signals", {}) or {}
+        market_sig = signals.get("market", {}) or {}
+        market_sig["value"] = float(max(-1.0, min(1.0, market_score)))
+        market_sig["confidence"] = 0.6 if day in market_map else 0.2
+        market_sig["quality_ok"] = bool(day in market_map)
+        signals["market"] = market_sig
+        row["signals"] = signals
+        risk = row.get("risk_context", {}) or {}
+        risk["market_regime"] = str(regime)
+        row["risk_context"] = risk
 
 
 def main() -> None:
@@ -113,10 +165,14 @@ def main() -> None:
         files = files[: args.max_symbols]
 
     rows = []
+    market_map = _market_features_by_time(input_dir)
     for fp in files:
         symbol = fp.stem.replace("_", "-").upper()
+        if symbol in {"SPY", "QQQ"}:
+            continue
         df = _load_symbol_csv(fp)
         rows.extend(_rows_from_bars(symbol, df))
+    _inject_market_context(rows, market_map)
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)

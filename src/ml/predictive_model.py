@@ -109,6 +109,9 @@ def _build_feature_row(row: dict[str, Any]) -> dict[str, float]:
     feature_map["sentiment_x_variance"] = feature_map["sig_sentiment_value"] * feature_map["risk_sentiment_variance"]
     feature_map["events_x_conf"] = feature_map["sig_events_value"] * feature_map["sig_events_confidence"]
     feature_map["micro_x_rel_volume"] = feature_map["sig_micro_value"] * feature_map["risk_rel_volume"]
+    regime = str(risk.get("market_regime", "unknown")).strip().lower()
+    for name in ["bull", "bear", "volatile", "sideways", "external", "unknown"]:
+        feature_map[f"regime_{name}"] = 1.0 if regime == name else 0.0
 
     return feature_map
 
@@ -157,13 +160,15 @@ def build_supervised_examples(entries: list[dict[str, Any]], horizon: int = 5) -
     return out
 
 
-def chronological_split(examples: list[Example], train_ratio: float = 0.8) -> tuple[list[Example], list[Example]]:
+def chronological_split(examples: list[Example], train_ratio: float = 0.8, purge_gap: int = 0) -> tuple[list[Example], list[Example]]:
     if not examples:
         return [], []
     ratio = min(max(float(train_ratio), 0.5), 0.95)
     cut = max(int(len(examples) * ratio), 1)
     cut = min(cut, len(examples) - 1)
-    return examples[:cut], examples[cut:]
+    gap = max(int(purge_gap), 0)
+    test_start = min(cut + gap, len(examples) - 1)
+    return examples[:cut], examples[test_start:]
 
 
 def _matrix(examples: list[Example]) -> tuple[list[str], Any, Any]:
@@ -305,9 +310,12 @@ def _train_core(
     model_family: str,
     random_state: int,
     include_models: bool = False,
+    min_edge_bps: float = 8.0,
+    trade_cost_bps: float = 8.0,
+    purge_gap: int = 0,
 ) -> dict[str, Any]:
     examples = build_supervised_examples(entries, horizon=horizon)
-    train, test = chronological_split(examples, train_ratio=train_ratio)
+    train, test = chronological_split(examples, train_ratio=train_ratio, purge_gap=purge_gap)
     if len(train) < 20 or len(test) < 10:
         return {
             "status": "insufficient_data",
@@ -320,7 +328,7 @@ def _train_core(
 
     feature_names, x_train, y_train = _matrix(train)
     _, x_test, y_test = _matrix(test)
-    label_threshold = _derive_label_threshold(y_train, min_edge_bps=2.0)
+    label_threshold = _derive_label_threshold(y_train, min_edge_bps=min_edge_bps)
     y_train_cls = _classification_labels(y_train, threshold=label_threshold)
     y_test_cls = _classification_labels(y_test, threshold=label_threshold)
 
@@ -344,7 +352,7 @@ def _train_core(
     importances = list(getattr(clf, "feature_importances_", []))
     ranked = sorted(zip(feature_names, importances), key=lambda t: t[1], reverse=True)
     top_features = [{"feature": n, "importance": float(v)} for n, v in ranked[:20]]
-    best_threshold, best_profit = _best_threshold_by_profit(y_true=y_test, y_prob=y_prob, trade_cost_bps=8.0)
+    best_threshold, best_profit = _best_threshold_by_profit(y_true=y_test, y_prob=y_prob, trade_cost_bps=trade_cost_bps)
     profit = dict(best_profit)
     profit["selected_threshold"] = float(best_threshold)
 
@@ -393,6 +401,9 @@ def train_and_evaluate(
         model_family=model_family,
         random_state=random_state,
         include_models=False,
+        min_edge_bps=8.0,
+        trade_cost_bps=8.0,
+        purge_gap=max(int(horizon), 1),
     )
 
 
@@ -415,6 +426,9 @@ def train_evaluate_and_save(
         model_family=model_family,
         random_state=random_state,
         include_models=True,
+        min_edge_bps=8.0,
+        trade_cost_bps=8.0,
+        purge_gap=max(int(horizon), 1),
     )
     if result.get("status") != "ok":
         return result
@@ -450,6 +464,7 @@ def run_model_search(
     train_ratio: float = 0.8,
     random_state: int = 11,
     save_best_artifact: str = "",
+    walk_forward_splits: int = 3,
 ) -> dict[str, Any]:
     if RandomForestClassifier is None or np is None:
         return {"status": "missing_deps", "detail": "Install scikit-learn and numpy"}
@@ -463,14 +478,52 @@ def run_model_search(
 
     for horizon in horizons:
         for family in model_families:
-            result = _train_core(
-                entries=entries,
-                horizon=int(horizon),
-                train_ratio=train_ratio,
-                model_family=family,
-                random_state=random_state,
-                include_models=False,
-            )
+            fold_results: list[dict[str, Any]] = []
+            n = len(build_supervised_examples(entries, horizon=int(horizon)))
+            splits = max(int(walk_forward_splits), 1)
+            ratios = [0.6 + (0.3 * (i / max(splits - 1, 1))) for i in range(splits)]
+            for ratio in ratios:
+                fr = _train_core(
+                    entries=entries,
+                    horizon=int(horizon),
+                    train_ratio=float(ratio),
+                    model_family=family,
+                    random_state=random_state,
+                    include_models=False,
+                    min_edge_bps=8.0,
+                    trade_cost_bps=8.0,
+                    purge_gap=max(int(horizon), 1),
+                )
+                if fr.get("status") == "ok":
+                    fold_results.append(fr)
+            if not fold_results:
+                result = {
+                    "status": "insufficient_data",
+                    "horizon": int(horizon),
+                    "model_family": family,
+                    "examples": n,
+                }
+            else:
+                # Aggregate fold metrics.
+                denom = float(len(fold_results))
+                result = dict(fold_results[-1])
+                result["objective"] = float(sum(float(r.get("objective", -1e9)) for r in fold_results) / denom)
+                result["classification"] = dict(result.get("classification", {}))
+                result["classification"]["roc_auc"] = float(
+                    sum(float((r.get("classification", {}) or {}).get("roc_auc", 0.5)) for r in fold_results) / denom
+                )
+                result["classification"]["positive_rate_test"] = float(
+                    sum(float((r.get("classification", {}) or {}).get("positive_rate_test", 0.0)) for r in fold_results)
+                    / denom
+                )
+                result["profit"] = dict(result.get("profit", {}))
+                result["profit"]["profit_factor"] = float(
+                    sum(float((r.get("profit", {}) or {}).get("profit_factor", 0.0)) for r in fold_results) / denom
+                )
+                result["profit"]["trades"] = float(
+                    sum(float((r.get("profit", {}) or {}).get("trades", 0.0)) for r in fold_results) / denom
+                )
+                result["walk_forward_splits"] = int(len(fold_results))
             leaderboard.append(result)
             if result.get("status") != "ok":
                 continue
@@ -566,6 +619,7 @@ def main() -> None:
     parser.add_argument("--model", default="random_forest", choices=["random_forest", "gradient_boosting"])
     parser.add_argument("--models", default="", help="Comma list for search mode")
     parser.add_argument("--search", action="store_true", help="Run model/horizon search and pick best")
+    parser.add_argument("--walk-forward-splits", type=int, default=3)
     parser.add_argument("--output", default="")
     parser.add_argument("--save-artifact", default="", help="Optional .pkl path to save trained model")
     args = parser.parse_args()
@@ -580,6 +634,7 @@ def main() -> None:
             model_families=model_families,
             train_ratio=args.train_ratio,
             save_best_artifact=args.save_artifact,
+            walk_forward_splits=args.walk_forward_splits,
         )
     elif args.save_artifact:
         result = train_evaluate_and_save(

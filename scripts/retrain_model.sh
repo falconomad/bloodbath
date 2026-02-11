@@ -22,6 +22,10 @@ SEARCH_MODELS="random_forest,gradient_boosting"
 EXPORT_DB=1
 FORCE_PROMOTE=0
 USE_EXTERNAL=1
+MIN_POS_RATE=0.08
+MIN_ROC_AUC=0.53
+MIN_PROFIT_FACTOR=1.05
+MIN_TRADES=20
 
 usage() {
   cat <<EOF
@@ -35,6 +39,10 @@ Options:
   --trace PATH           Trace jsonl path (default: logs/recommendation_trace.jsonl)
   --no-external          Disable external Alpaca dataset merge
   --no-export-db         Do not refresh trace from DB
+  --min-pos-rate X       Promotion gate (default: 0.08)
+  --min-roc-auc X        Promotion gate (default: 0.53)
+  --min-profit-factor X  Promotion gate (default: 1.05)
+  --min-trades N         Promotion gate (default: 20)
   --force                Promote candidate even if not better
   -h, --help             Show this help
 
@@ -60,6 +68,14 @@ while [[ $# -gt 0 ]]; do
       USE_EXTERNAL=0; shift ;;
     --no-export-db)
       EXPORT_DB=0; shift ;;
+    --min-pos-rate)
+      MIN_POS_RATE="$2"; shift 2 ;;
+    --min-roc-auc)
+      MIN_ROC_AUC="$2"; shift 2 ;;
+    --min-profit-factor)
+      MIN_PROFIT_FACTOR="$2"; shift 2 ;;
+    --min-trades)
+      MIN_TRADES="$2"; shift 2 ;;
     --force)
       FORCE_PROMOTE=1; shift ;;
     -h|--help)
@@ -247,16 +263,43 @@ print(rate)
 PY
 )"
 
-if [[ "$FORCE_PROMOTE" -ne 1 ]]; then
-  TOO_LOW="$($PYTHON_BIN - <<PY
-rate = float("$POS_RATE")
-print("yes" if rate <= 0.0 else "no")
+GATES="$($PYTHON_BIN - <<PY
+import json
+from pathlib import Path
+obj = json.loads(Path("$CANDIDATE_METRICS_PATH").read_text(encoding="utf-8"))
+cand = (obj.get("best_saved") or obj)
+clf = cand.get("classification") or {}
+profit = cand.get("profit") or {}
+vals = {
+  "pos_rate": float(clf.get("positive_rate_test", 0.0) or 0.0),
+  "roc_auc": float(clf.get("roc_auc", 0.5) or 0.5),
+  "profit_factor": float(profit.get("profit_factor", 0.0) or 0.0),
+  "trades": float(profit.get("trades", 0.0) or 0.0),
+}
+print(json.dumps(vals))
 PY
 )"
-  if [[ "$TOO_LOW" == "yes" ]]; then
+
+if [[ "$FORCE_PROMOTE" -ne 1 ]]; then
+FAILED_GATES="$($PYTHON_BIN - <<PY
+import json
+g = json.loads("""$GATES""")
+fails = []
+if float(g["pos_rate"]) < float("$MIN_POS_RATE"):
+    fails.append(f"pos_rate<{float('$MIN_POS_RATE')}")
+if float(g["roc_auc"]) < float("$MIN_ROC_AUC"):
+    fails.append(f"roc_auc<{float('$MIN_ROC_AUC')}")
+if float(g["profit_factor"]) < float("$MIN_PROFIT_FACTOR"):
+    fails.append(f"profit_factor<{float('$MIN_PROFIT_FACTOR')}")
+if float(g["trades"]) < float("$MIN_TRADES"):
+    fails.append(f"trades<{float('$MIN_TRADES')}")
+print(",".join(fails))
+PY
+)"
+  if [[ -n "$FAILED_GATES" ]]; then
     rm -f "$CANDIDATE_PATH"
     rm -f "$CANDIDATE_METRICS_PATH"
-    echo "[retrain] skipped promotion: test positive rate is zero (likely low-signal dataset period)"
+    echo "[retrain] skipped promotion: failed gates -> $FAILED_GATES"
     exit 0
   fi
 fi

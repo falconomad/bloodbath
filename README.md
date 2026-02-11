@@ -54,6 +54,13 @@ Model Retraining Loop:
 - It now auto-merges external Alpaca history (if present in `data/external/alpaca_daily`) with DB trace before training.
 - Disable external merge if needed:
   - `./scripts/retrain_model.sh --no-external`
+- Promotion gates (default):
+  - `positive_rate_test >= 0.08`
+  - `roc_auc >= 0.53`
+  - `profit_factor >= 1.05`
+  - `trades >= 20`
+- Override gates if needed:
+  - `./scripts/retrain_model.sh --min-pos-rate 0.05 --min-roc-auc 0.52 --min-profit-factor 1.02 --min-trades 10`
 
 Data/Label Diagnostics:
 
