@@ -351,6 +351,58 @@ def _portfolio_risk_context_for_ticker(ticker, analyses_so_far, candidates):
     }
 
 
+def _apply_loser_hunter_rebound_override(meta, analysis):
+    if not LOSER_HUNTER_ENABLED:
+        return analysis, False
+    if str(analysis.get("mover_bucket", "")).upper() != "LOSER":
+        return analysis, False
+    daily_ret = float(analysis.get("daily_return", 0.0) or 0.0)
+    if daily_ret > (-float(LOSER_MIN_DROP_PCT)):
+        return analysis, False
+
+    dip_score = float(meta.get("dip_score", 0.0) or 0.0)
+    stabilized = bool(meta.get("stabilized", False))
+    if LOSER_REQUIRE_STABILIZATION and not stabilized:
+        return analysis, False
+    if dip_score < float(LOSER_MIN_DIP_SCORE):
+        return analysis, False
+
+    current_decision = str(analysis.get("decision", "HOLD")).upper()
+    if current_decision == "BUY":
+        return analysis, False
+
+    score = float(analysis.get("score", 0.0) or 0.0)
+    conf = float(analysis.get("signal_confidence", 0.0) or 0.0)
+    sentiment = float(analysis.get("sentiment", 0.0) or 0.0)
+    growth = float(analysis.get("growth_20d", 0.0) or 0.0)
+    atr = float(analysis.get("atr_pct", 0.0) or 0.0)
+
+    rebound_votes = 0
+    if conf >= 0.40:
+        rebound_votes += 1
+    if sentiment >= -0.15:
+        rebound_votes += 1
+    if growth >= -0.015:
+        rebound_votes += 1
+    if atr <= 0.08:
+        rebound_votes += 1
+    if score >= (TOP20_MIN_BUY_SCORE - 0.20):
+        rebound_votes += 1
+
+    if rebound_votes < 3:
+        return analysis, False
+
+    out = dict(analysis)
+    out["decision"] = "BUY"
+    out["score"] = max(float(out.get("score", 0.0) or 0.0), float(TOP20_MIN_BUY_SCORE) + 0.05)
+    base_size = float(out.get("position_size", 0.0) or 0.0)
+    out["position_size"] = min(max(base_size, 0.05), 0.12)
+    reasons = list(out.get("decision_reasons", []) or [])
+    reasons.append(f"loser_hunter:rebound_override:votes={rebound_votes}")
+    out["decision_reasons"] = reasons
+    return out, True
+
+
 def run_top20_cycle_with_signals():
     global _CYCLE_INDEX
     _CYCLE_INDEX += 1
@@ -373,6 +425,7 @@ def run_top20_cycle_with_signals():
     cycle_market_news = get_market_sentiment_news(limit=12)
 
     print(f"[cycle] Evaluating {len(candidates)} candidate tickers")
+    rebound_overrides = 0
     for ticker, meta in candidates.items():
         data = meta["data"] if meta["data"] is not None else get_price_data(ticker, period="6mo", interval="1d")
         if data.empty:
@@ -401,7 +454,7 @@ def run_top20_cycle_with_signals():
         )
         decision = rec.get("decision", "HOLD")
 
-        analyses.append(
+        analysis = (
             {
                 "ticker": ticker,
                 "decision": decision,
@@ -421,6 +474,10 @@ def run_top20_cycle_with_signals():
                 "decision_reasons": rec.get("decision_reasons", []),
             }
         )
+        analysis, overridden = _apply_loser_hunter_rebound_override(meta, analysis)
+        if overridden:
+            rebound_overrides += 1
+        analyses.append(analysis)
 
     # Always mark-to-market current holdings, even if they were not in the current candidate slice.
     held_tickers = set(top20_manager.holdings.keys())
@@ -471,6 +528,8 @@ def run_top20_cycle_with_signals():
             f"cache_hits={cache_hits} actions={actions or {'NONE': 0}} "
             f"cooldown_until={after.get('cooldown_until', '-') or '-'}"
         )
+    if LOSER_HUNTER_ENABLED:
+        print(f"[cycle][loser_hunter] rebound_overrides={rebound_overrides}")
     buys = sum(1 for a in analyses if a["decision"] == "BUY")
     sells = sum(1 for a in analyses if a["decision"] == "SELL")
     holds = sum(1 for a in analyses if a["decision"] == "HOLD")
