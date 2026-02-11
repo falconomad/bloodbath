@@ -29,6 +29,9 @@ except Exception:  # pragma: no cover
     roc_auc_score = None
 
 
+SIGNAL_NAMES = ["trend", "sentiment", "social", "market", "events", "micro", "dip", "volatility"]
+
+
 @dataclass
 class Example:
     ts: str
@@ -57,16 +60,33 @@ def _build_feature_row(row: dict[str, Any]) -> dict[str, float]:
     risk = dict(row.get("risk_context", {}) or {})
 
     feature_map: dict[str, float] = {}
-    # Signal block: sentiment is one feature among many.
-    for name in ["trend", "sentiment", "social", "market", "events", "micro", "dip", "volatility"]:
-        payload = dict(signals.get(name, {}) or {})
-        feature_map[f"sig_{name}_value"] = safe_float(payload.get("value", 0.0))
-        feature_map[f"sig_{name}_confidence"] = safe_float(payload.get("confidence", 0.0))
-        feature_map[f"sig_{name}_quality"] = 1.0 if bool(payload.get("quality_ok", False)) else 0.0
+    quality_count = 0.0
+    signal_value_abs_sum = 0.0
 
-    feature_map["score"] = safe_float(row.get("score", 0.0))
-    feature_map["conflict_ratio"] = safe_float(row.get("conflict_ratio", 0.0))
-    feature_map["decision_confidence"] = safe_float(row.get("confidence", 0.0))
+    for name in SIGNAL_NAMES:
+        payload = dict(signals.get(name, {}) or {})
+        value = safe_float(payload.get("value", 0.0))
+        confidence = safe_float(payload.get("confidence", 0.0))
+        quality = 1.0 if bool(payload.get("quality_ok", False)) else 0.0
+
+        feature_map[f"sig_{name}_value"] = value
+        feature_map[f"sig_{name}_confidence"] = confidence
+        feature_map[f"sig_{name}_quality"] = quality
+        feature_map[f"sig_{name}_signed_conf"] = value * confidence
+
+        quality_count += quality
+        signal_value_abs_sum += abs(value)
+
+    score = safe_float(row.get("score", 0.0))
+    conflict_ratio = safe_float(row.get("conflict_ratio", 0.0))
+    decision_conf = safe_float(row.get("confidence", 0.0))
+
+    feature_map["score"] = score
+    feature_map["score_abs"] = abs(score)
+    feature_map["conflict_ratio"] = conflict_ratio
+    feature_map["decision_confidence"] = decision_conf
+    feature_map["usable_signal_count"] = quality_count
+    feature_map["signal_abs_mean"] = signal_value_abs_sum / max(len(SIGNAL_NAMES), 1)
 
     for key in [
         "rel_volume",
@@ -79,8 +99,16 @@ def _build_feature_row(row: dict[str, Any]) -> dict[str, float]:
         "sentiment_article_count",
         "social_post_count",
         "market_news_count",
+        "event_article_count",
     ]:
         feature_map[f"risk_{key}"] = safe_float(risk.get(key, 0.0))
+
+    # Interaction terms for regime + confidence context.
+    feature_map["trend_x_rel_volume"] = feature_map["sig_trend_value"] * feature_map["risk_rel_volume"]
+    feature_map["trend_x_atr"] = feature_map["sig_trend_value"] * feature_map["risk_atr_pct"]
+    feature_map["sentiment_x_variance"] = feature_map["sig_sentiment_value"] * feature_map["risk_sentiment_variance"]
+    feature_map["events_x_conf"] = feature_map["sig_events_value"] * feature_map["sig_events_confidence"]
+    feature_map["micro_x_rel_volume"] = feature_map["sig_micro_value"] * feature_map["risk_rel_volume"]
 
     return feature_map
 
@@ -116,13 +144,12 @@ def build_supervised_examples(entries: list[dict[str, Any]], horizon: int = 5) -
             p1 = safe_float(rows[j].get("price", 0.0))
             if p0 <= 0 or p1 <= 0:
                 continue
-            target_return = (p1 - p0) / p0
             out.append(
                 Example(
                     ts=str(row.get("ts", "")),
                     ticker=ticker,
                     features=_build_feature_row(row),
-                    target_return=float(target_return),
+                    target_return=float((p1 - p0) / p0),
                 )
             )
 
@@ -133,8 +160,8 @@ def build_supervised_examples(entries: list[dict[str, Any]], horizon: int = 5) -
 def chronological_split(examples: list[Example], train_ratio: float = 0.8) -> tuple[list[Example], list[Example]]:
     if not examples:
         return [], []
-    train_ratio = min(max(float(train_ratio), 0.5), 0.95)
-    cut = max(int(len(examples) * train_ratio), 1)
+    ratio = min(max(float(train_ratio), 0.5), 0.95)
+    cut = max(int(len(examples) * ratio), 1)
     cut = min(cut, len(examples) - 1)
     return examples[:cut], examples[cut:]
 
@@ -174,17 +201,111 @@ def _profit_metrics(y_true: Any, y_prob: Any, threshold: float = 0.55, trade_cos
     }
 
 
-def train_and_evaluate(
-    trace_path: str,
-    horizon: int = 5,
-    train_ratio: float = 0.8,
-    model_family: str = "random_forest",
-    random_state: int = 11,
-) -> dict[str, Any]:
-    if RandomForestClassifier is None or np is None:
-        return {"status": "missing_deps", "detail": "Install scikit-learn and numpy"}
+def _derive_label_threshold(y: Any, min_edge_bps: float = 2.0) -> float:
+    if np is None:
+        raise RuntimeError("numpy is required for label generation")
+    arr = np.asarray(y, dtype=float)
+    edge = float(min_edge_bps) / 10_000.0
+    labels = (arr > edge).astype(int)
+    pos_rate = float(np.mean(labels)) if labels.size else 0.0
+    if pos_rate < 0.08 or pos_rate > 0.92:
+        return float(np.quantile(arr, 0.65))
+    return edge
 
-    entries = load_jsonl_dict_rows(trace_path)
+
+def _classification_labels(y: Any, threshold: float) -> Any:
+    if np is None:
+        raise RuntimeError("numpy is required for label generation")
+    return (np.asarray(y, dtype=float) > float(threshold)).astype(int)
+
+
+def _class_sample_weights(labels: Any) -> Any:
+    if np is None:
+        raise RuntimeError("numpy is required for sample weights")
+    arr = np.asarray(labels, dtype=int)
+    if arr.size == 0:
+        return np.asarray([], dtype=float)
+    pos = max(float(np.sum(arr == 1)), 1.0)
+    neg = max(float(np.sum(arr == 0)), 1.0)
+    total = pos + neg
+    w_pos = total / (2.0 * pos)
+    w_neg = total / (2.0 * neg)
+    return np.where(arr == 1, w_pos, w_neg).astype(float)
+
+
+def _best_threshold_by_profit(y_true: Any, y_prob: Any, trade_cost_bps: float = 8.0) -> tuple[float, dict[str, float]]:
+    if np is None:
+        return 0.55, _profit_metrics(y_true, y_prob, threshold=0.55, trade_cost_bps=trade_cost_bps)
+    candidates = [round(x, 2) for x in np.arange(0.45, 0.81, 0.02)]
+    best_t = 0.55
+    best_m = _profit_metrics(y_true, y_prob, threshold=best_t, trade_cost_bps=trade_cost_bps)
+    for t in candidates:
+        m = _profit_metrics(y_true, y_prob, threshold=float(t), trade_cost_bps=trade_cost_bps)
+        # Prefer positive expectancy with non-trivial trading, then total return.
+        rank = (
+            float(m.get("strategy_total_return", 0.0)),
+            float(m.get("avg_trade_expectancy", 0.0)),
+            float(m.get("trades", 0.0)),
+        )
+        best_rank = (
+            float(best_m.get("strategy_total_return", 0.0)),
+            float(best_m.get("avg_trade_expectancy", 0.0)),
+            float(best_m.get("trades", 0.0)),
+        )
+        if rank > best_rank:
+            best_t = float(t)
+            best_m = m
+    return best_t, best_m
+
+
+def _score_result(result: dict[str, Any]) -> float:
+    profit = result.get("profit", {}) or {}
+    clf = result.get("classification", {}) or {}
+
+    trades = float(profit.get("trades", 0.0) or 0.0)
+    profit_factor = float(profit.get("profit_factor", 0.0) or 0.0)
+    roc_auc = float(clf.get("roc_auc", 0.5) or 0.5)
+    expectancy = float(profit.get("avg_trade_expectancy", 0.0) or 0.0)
+    strat_ret = float(profit.get("strategy_total_return", 0.0) or 0.0)
+
+    objective = (
+        0.40 * min(max(profit_factor, 0.0), 4.0)
+        + 0.40 * roc_auc
+        + 12.0 * expectancy
+        + 0.15 * strat_ret
+    )
+    if trades < 5:
+        objective -= 0.5
+    return float(objective)
+
+
+def _build_models(model_family: str, random_state: int):
+    family = str(model_family).strip().lower()
+    if family == "gradient_boosting":
+        clf = GradientBoostingClassifier(random_state=random_state)
+        reg = GradientBoostingRegressor(random_state=random_state)
+    else:
+        family = "random_forest"
+        clf = RandomForestClassifier(
+            n_estimators=500,
+            max_depth=12,
+            min_samples_leaf=5,
+            random_state=random_state,
+            n_jobs=-1,
+            class_weight="balanced_subsample",
+        )
+        reg = RandomForestRegressor(n_estimators=350, max_depth=10, min_samples_leaf=6, random_state=random_state, n_jobs=-1)
+    return family, clf, reg
+
+
+def _train_core(
+    entries: list[dict[str, Any]],
+    horizon: int,
+    train_ratio: float,
+    model_family: str,
+    random_state: int,
+    include_models: bool = False,
+) -> dict[str, Any]:
     examples = build_supervised_examples(entries, horizon=horizon)
     train, test = chronological_split(examples, train_ratio=train_ratio)
     if len(train) < 20 or len(test) < 10:
@@ -193,23 +314,22 @@ def train_and_evaluate(
             "examples": len(examples),
             "train_examples": len(train),
             "test_examples": len(test),
+            "horizon": int(horizon),
+            "model_family": str(model_family),
         }
 
     feature_names, x_train, y_train = _matrix(train)
     _, x_test, y_test = _matrix(test)
+    label_threshold = _derive_label_threshold(y_train, min_edge_bps=2.0)
+    y_train_cls = _classification_labels(y_train, threshold=label_threshold)
+    y_test_cls = _classification_labels(y_test, threshold=label_threshold)
 
-    y_train_cls = (y_train > 0).astype(int)
-    y_test_cls = (y_test > 0).astype(int)
-
-    family = str(model_family).strip().lower()
+    family, clf, reg = _build_models(model_family, random_state=random_state)
+    train_weights = _class_sample_weights(y_train_cls)
     if family == "gradient_boosting":
-        clf = GradientBoostingClassifier(random_state=random_state)
-        reg = GradientBoostingRegressor(random_state=random_state)
+        clf.fit(x_train, y_train_cls, sample_weight=train_weights)
     else:
-        clf = RandomForestClassifier(n_estimators=250, max_depth=8, min_samples_leaf=8, random_state=random_state, n_jobs=-1)
-        reg = RandomForestRegressor(n_estimators=250, max_depth=8, min_samples_leaf=8, random_state=random_state, n_jobs=-1)
-
-    clf.fit(x_train, y_train_cls)
+        clf.fit(x_train, y_train_cls)
     reg.fit(x_train, y_train)
 
     y_pred_cls = clf.predict(x_test)
@@ -224,10 +344,11 @@ def train_and_evaluate(
     importances = list(getattr(clf, "feature_importances_", []))
     ranked = sorted(zip(feature_names, importances), key=lambda t: t[1], reverse=True)
     top_features = [{"feature": n, "importance": float(v)} for n, v in ranked[:20]]
+    best_threshold, best_profit = _best_threshold_by_profit(y_true=y_test, y_prob=y_prob, trade_cost_bps=8.0)
+    profit = dict(best_profit)
+    profit["selected_threshold"] = float(best_threshold)
 
-    profit = _profit_metrics(y_true=y_test, y_prob=y_prob)
-
-    return {
+    result = {
         "status": "ok",
         "model_family": family,
         "horizon": int(horizon),
@@ -238,13 +359,41 @@ def train_and_evaluate(
             "precision": precision,
             "recall": recall,
             "roc_auc": roc_auc,
+            "label_threshold": float(label_threshold),
+            "positive_rate_test": float(np.mean(y_test_cls)) if len(y_test_cls) else 0.0,
         },
-        "regression": {
-            "rmse": rmse,
-        },
+        "regression": {"rmse": rmse},
         "profit": profit,
         "top_features": top_features,
     }
+    result["objective"] = _score_result(result)
+
+    if include_models:
+        result["_classifier"] = clf
+        result["_regressor"] = reg
+        result["_feature_names"] = feature_names
+    return result
+
+
+def train_and_evaluate(
+    trace_path: str,
+    horizon: int = 5,
+    train_ratio: float = 0.8,
+    model_family: str = "random_forest",
+    random_state: int = 11,
+) -> dict[str, Any]:
+    if RandomForestClassifier is None or np is None:
+        return {"status": "missing_deps", "detail": "Install scikit-learn and numpy"}
+
+    entries = load_jsonl_dict_rows(trace_path)
+    return _train_core(
+        entries=entries,
+        horizon=horizon,
+        train_ratio=train_ratio,
+        model_family=model_family,
+        random_state=random_state,
+        include_models=False,
+    )
 
 
 def train_evaluate_and_save(
@@ -259,52 +408,29 @@ def train_evaluate_and_save(
         return {"status": "missing_deps", "detail": "Install scikit-learn and numpy"}
 
     entries = load_jsonl_dict_rows(trace_path)
-    examples = build_supervised_examples(entries, horizon=horizon)
-    train, test = chronological_split(examples, train_ratio=train_ratio)
-    if len(train) < 20 or len(test) < 10:
-        return {
-            "status": "insufficient_data",
-            "examples": len(examples),
-            "train_examples": len(train),
-            "test_examples": len(test),
-        }
-
-    feature_names, x_train, y_train = _matrix(train)
-    _, x_test, y_test = _matrix(test)
-    y_train_cls = (y_train > 0).astype(int)
-    y_test_cls = (y_test > 0).astype(int)
-
-    family = str(model_family).strip().lower()
-    if family == "gradient_boosting":
-        clf = GradientBoostingClassifier(random_state=random_state)
-        reg = GradientBoostingRegressor(random_state=random_state)
-    else:
-        clf = RandomForestClassifier(n_estimators=250, max_depth=8, min_samples_leaf=8, random_state=random_state, n_jobs=-1)
-        reg = RandomForestRegressor(n_estimators=250, max_depth=8, min_samples_leaf=8, random_state=random_state, n_jobs=-1)
-
-    clf.fit(x_train, y_train_cls)
-    reg.fit(x_train, y_train)
-
-    y_pred_cls = clf.predict(x_test)
-    y_prob = clf.predict_proba(x_test)[:, 1]
-    y_pred_ret = reg.predict(x_test)
-    precision = float(precision_score(y_test_cls, y_pred_cls, zero_division=0))
-    recall = float(recall_score(y_test_cls, y_pred_cls, zero_division=0))
-    roc_auc = float(roc_auc_score(y_test_cls, y_prob)) if len(set(y_test_cls.tolist())) > 1 else 0.5
-    rmse = math.sqrt(float(mean_squared_error(y_test, y_pred_ret)))
-    profit = _profit_metrics(y_true=y_test, y_prob=y_prob)
+    result = _train_core(
+        entries=entries,
+        horizon=horizon,
+        train_ratio=train_ratio,
+        model_family=model_family,
+        random_state=random_state,
+        include_models=True,
+    )
+    if result.get("status") != "ok":
+        return result
 
     artifact = {
-        "version": 1,
-        "model_family": family,
-        "horizon": int(horizon),
-        "feature_names": feature_names,
-        "classifier": clf,
-        "regressor": reg,
+        "version": 2,
+        "model_family": result["model_family"],
+        "horizon": int(result["horizon"]),
+        "feature_names": result["_feature_names"],
+        "classifier": result["_classifier"],
+        "regressor": result["_regressor"],
         "metrics": {
-            "classification": {"precision": precision, "recall": recall, "roc_auc": roc_auc},
-            "regression": {"rmse": rmse},
-            "profit": profit,
+            "classification": result["classification"],
+            "regression": result["regression"],
+            "profit": result["profit"],
+            "objective": result["objective"],
         },
     }
     out = Path(output_path)
@@ -312,18 +438,67 @@ def train_evaluate_and_save(
     with out.open("wb") as f:
         pickle.dump(artifact, f)
 
-    return {
-        "status": "ok",
-        "artifact_path": str(out),
-        "model_family": family,
-        "horizon": int(horizon),
-        "examples": len(examples),
-        "train_examples": len(train),
-        "test_examples": len(test),
-        "classification": artifact["metrics"]["classification"],
-        "regression": artifact["metrics"]["regression"],
-        "profit": artifact["metrics"]["profit"],
+    clean = {k: v for k, v in result.items() if not str(k).startswith("_")}
+    clean["artifact_path"] = str(out)
+    return clean
+
+
+def run_model_search(
+    trace_path: str,
+    horizons: list[int],
+    model_families: list[str],
+    train_ratio: float = 0.8,
+    random_state: int = 11,
+    save_best_artifact: str = "",
+) -> dict[str, Any]:
+    if RandomForestClassifier is None or np is None:
+        return {"status": "missing_deps", "detail": "Install scikit-learn and numpy"}
+
+    entries = load_jsonl_dict_rows(trace_path)
+    if not entries:
+        return {"status": "insufficient_data", "examples": 0}
+
+    leaderboard: list[dict[str, Any]] = []
+    best: dict[str, Any] | None = None
+
+    for horizon in horizons:
+        for family in model_families:
+            result = _train_core(
+                entries=entries,
+                horizon=int(horizon),
+                train_ratio=train_ratio,
+                model_family=family,
+                random_state=random_state,
+                include_models=False,
+            )
+            leaderboard.append(result)
+            if result.get("status") != "ok":
+                continue
+            if best is None or float(result.get("objective", -1e9)) > float(best.get("objective", -1e9)):
+                best = result
+
+    leaderboard.sort(key=lambda r: float(r.get("objective", -1e9)), reverse=True)
+
+    output: dict[str, Any] = {
+        "status": "ok" if best is not None else "insufficient_data",
+        "trace_path": trace_path,
+        "candidates": len(leaderboard),
+        "leaderboard": leaderboard,
+        "best": best,
     }
+
+    if best is not None and save_best_artifact:
+        promoted = train_evaluate_and_save(
+            trace_path=trace_path,
+            output_path=save_best_artifact,
+            horizon=int(best["horizon"]),
+            train_ratio=train_ratio,
+            model_family=str(best["model_family"]),
+            random_state=random_state,
+        )
+        output["best_saved"] = promoted
+
+    return output
 
 
 def load_model_artifact(path: str) -> dict[str, Any] | None:
@@ -354,17 +529,59 @@ def predict_from_artifact(artifact: dict[str, Any], feature_row: dict[str, float
     return {"prob_up": prob_up, "expected_return": expected_return}
 
 
+def _parse_int_list(raw: str, default: list[int]) -> list[int]:
+    text = str(raw or "").strip()
+    if not text:
+        return default
+    values = []
+    for chunk in text.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            values.append(max(int(chunk), 1))
+        except ValueError:
+            continue
+    return values or default
+
+
+def _parse_str_list(raw: str, default: list[str]) -> list[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return default
+    values = [x.strip().lower() for x in text.split(",") if x.strip()]
+    out = []
+    for v in values:
+        if v in {"random_forest", "gradient_boosting"}:
+            out.append(v)
+    return out or default
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train predictive return models from trace history")
     parser.add_argument("--trace", default="logs/recommendation_trace.jsonl")
-    parser.add_argument("--horizon", type=int, default=5, help="Forward horizon in steps (e.g. 5 or 10)")
+    parser.add_argument("--horizon", type=int, default=5, help="Forward horizon in steps")
+    parser.add_argument("--horizons", default="", help="Comma list for search mode, e.g. 5,10,20")
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--model", default="random_forest", choices=["random_forest", "gradient_boosting"])
+    parser.add_argument("--models", default="", help="Comma list for search mode")
+    parser.add_argument("--search", action="store_true", help="Run model/horizon search and pick best")
     parser.add_argument("--output", default="")
-    parser.add_argument("--save-artifact", default="", help="Optional .pkl path to save trained models")
+    parser.add_argument("--save-artifact", default="", help="Optional .pkl path to save trained model")
     args = parser.parse_args()
 
-    if args.save_artifact:
+    use_search = bool(args.search or args.horizons or args.models)
+    if use_search:
+        horizons = _parse_int_list(args.horizons, [args.horizon])
+        model_families = _parse_str_list(args.models, [args.model])
+        result = run_model_search(
+            trace_path=args.trace,
+            horizons=horizons,
+            model_families=model_families,
+            train_ratio=args.train_ratio,
+            save_best_artifact=args.save_artifact,
+        )
+    elif args.save_artifact:
         result = train_evaluate_and_save(
             trace_path=args.trace,
             output_path=args.save_artifact,
@@ -379,6 +596,7 @@ def main() -> None:
             train_ratio=args.train_ratio,
             model_family=args.model,
         )
+
     text = json.dumps(result, indent=2, sort_keys=True)
     print(text)
 

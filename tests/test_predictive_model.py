@@ -8,6 +8,7 @@ from src.ml.predictive_model import (
     build_supervised_examples,
     load_model_artifact,
     predict_from_artifact,
+    run_model_search,
     train_and_evaluate,
     train_evaluate_and_save,
 )
@@ -127,6 +128,31 @@ class PredictiveModelTests(unittest.TestCase):
         finally:
             trace_path.unlink(missing_ok=True)
             model_file.unlink(missing_ok=True)
+
+    def test_model_search_returns_best_candidate(self):
+        rows = []
+        for i in range(45):
+            day = i + 1
+            rows.append(self._base_row(f"2025-04-{day:02d}T10:00:00+00:00", "AAA", 100 + (i * 0.4), 0.6, 0.1))
+            rows.append(self._base_row(f"2025-04-{day:02d}T10:00:00+00:00", "BBB", 120 - (i * 0.4), -0.6, -0.1))
+        path = self._write_trace(rows)
+        try:
+            result = run_model_search(
+                trace_path=str(path),
+                horizons=[5, 10],
+                model_families=["random_forest", "gradient_boosting"],
+                train_ratio=0.8,
+                save_best_artifact="",
+            )
+            if result.get("status") == "missing_deps":
+                self.assertIn("detail", result)
+                return
+            self.assertEqual(result.get("status"), "ok")
+            self.assertIn("leaderboard", result)
+            self.assertIsNotNone(result.get("best"))
+            self.assertGreaterEqual(len(result.get("leaderboard", [])), 2)
+        finally:
+            path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -47,3 +47,6 @@ Model Retraining Loop:
 - If `DATABASE_URL` is set, it refreshes trace data from DB, trains a candidate model, and promotes it only if metrics improve.
 - Force promote a retrain run:
   - `./scripts/retrain_model.sh --force`
+- The retrain script now searches multiple candidates automatically:
+  - horizons: `5,10,20`
+  - models: `random_forest,gradient_boosting`

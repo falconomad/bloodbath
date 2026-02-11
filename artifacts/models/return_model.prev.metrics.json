@@ -1,7 +1,6 @@
 {
   "best": {
     "classification": {
-      "label_threshold": 0.0002,
       "positive_rate_test": 0.0,
       "precision": 0.0,
       "recall": 0.0,
@@ -20,7 +19,7 @@
       "trades": 0.0
     },
     "regression": {
-      "rmse": 0.00021485114697158503
+      "rmse": 0.000214851146971585
     },
     "status": "ok",
     "test_examples": 152,
@@ -111,7 +110,6 @@
   "best_saved": {
     "artifact_path": "/Users/appucyriac/Projects/bloodbath/artifacts/models/return_model.candidate.pkl",
     "classification": {
-      "label_threshold": 0.0002,
       "positive_rate_test": 0.0,
       "precision": 0.0,
       "recall": 0.0,
@@ -222,7 +220,6 @@
   "leaderboard": [
     {
       "classification": {
-        "label_threshold": 0.0002,
         "positive_rate_test": 0.0,
         "precision": 0.0,
         "recall": 0.0,
@@ -241,7 +238,7 @@
         "trades": 0.0
       },
       "regression": {
-        "rmse": 0.00021485114697158503
+        "rmse": 0.000214851146971585
       },
       "status": "ok",
       "test_examples": 152,
@@ -331,7 +328,6 @@
     },
     {
       "classification": {
-        "label_threshold": 0.0002,
         "positive_rate_test": 0.0,
         "precision": 0.0,
         "recall": 0.0,
@@ -440,7 +436,6 @@
     },
     {
       "classification": {
-        "label_threshold": 0.0002,
         "positive_rate_test": 0.0,
         "precision": 0.0,
         "recall": 0.0,
@@ -549,7 +544,6 @@
     },
     {
       "classification": {
-        "label_threshold": 0.0002,
         "positive_rate_test": 0.0,
         "precision": 0.0,
         "recall": 0.0,
@@ -658,7 +652,6 @@
     },
     {
       "classification": {
-        "label_threshold": 0.0002,
         "positive_rate_test": 0.0,
         "precision": 0.0,
         "recall": 0.0,
@@ -767,7 +760,6 @@
     },
     {
       "classification": {
-        "label_threshold": 0.0002,
         "positive_rate_test": 0.0,
         "precision": 0.0,
         "recall": 0.0,

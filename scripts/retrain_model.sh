@@ -13,6 +13,8 @@ CANDIDATE_METRICS_PATH="$MODEL_DIR/return_model.candidate.metrics.json"
 
 HORIZON=5
 MODEL_FAMILY="random_forest"
+SEARCH_HORIZONS="5,10,20"
+SEARCH_MODELS="random_forest,gradient_boosting"
 EXPORT_DB=1
 FORCE_PROMOTE=0
 
@@ -23,6 +25,8 @@ Usage: $(basename "$0") [options]
 Options:
   --horizon N            Forward horizon (default: 5)
   --model NAME           Model family: random_forest|gradient_boosting (default: random_forest)
+  --horizons CSV         Search horizons (default: 5,10,20)
+  --models CSV           Search model families (default: random_forest,gradient_boosting)
   --trace PATH           Trace jsonl path (default: logs/recommendation_trace.jsonl)
   --no-export-db         Do not refresh trace from DB
   --force                Promote candidate even if not better
@@ -40,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       HORIZON="$2"; shift 2 ;;
     --model)
       MODEL_FAMILY="$2"; shift 2 ;;
+    --horizons)
+      SEARCH_HORIZONS="$2"; shift 2 ;;
+    --models)
+      SEARCH_MODELS="$2"; shift 2 ;;
     --trace)
       TRACE_PATH="$2"; shift 2 ;;
     --no-export-db)
@@ -104,6 +112,9 @@ fi
 echo "[retrain] training candidate model"
 "$PYTHON_BIN" -m src.ml.predictive_model \
   --trace "$TRACE_PATH" \
+  --search \
+  --horizons "$SEARCH_HORIZONS" \
+  --models "$SEARCH_MODELS" \
   --horizon "$HORIZON" \
   --model "$MODEL_FAMILY" \
   --save-artifact "$CANDIDATE_PATH" \
@@ -118,7 +129,8 @@ STATUS="$($PYTHON_BIN - <<PY
 import json
 from pathlib import Path
 obj = json.loads(Path("$CANDIDATE_METRICS_PATH").read_text(encoding="utf-8"))
-print(obj.get("status", ""))
+saved = obj.get("best_saved") or {}
+print(saved.get("status", obj.get("status", "")))
 PY
 )"
 
@@ -145,9 +157,10 @@ new = json.loads(Path("$CANDIDATE_METRICS_PATH").read_text(encoding="utf-8"))
 old = json.loads(Path("$METRICS_PATH").read_text(encoding="utf-8"))
 
 def getvals(obj):
-    p = float(((obj.get("profit") or {}).get("profit_factor", 0.0)) or 0.0)
-    a = float(((obj.get("classification") or {}).get("roc_auc", 0.0)) or 0.0)
-    e = float(((obj.get("profit") or {}).get("avg_trade_expectancy", 0.0)) or 0.0)
+    cand = (obj.get("best_saved") or obj)
+    p = float((((cand.get("profit") or {}).get("profit_factor", 0.0)) or 0.0))
+    a = float((((cand.get("classification") or {}).get("roc_auc", 0.0)) or 0.0))
+    e = float((((cand.get("profit") or {}).get("avg_trade_expectancy", 0.0)) or 0.0))
     return (p, a, e)
 
 n = getvals(new)
