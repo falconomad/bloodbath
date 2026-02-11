@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ class GeminiGuard:
         self._state = self._load_state()
         self._base_daily_cap = self._default_daily_cap(self.model)
         self.max_tickers_per_request = self._default_batch_size(self.model)
+        self.max_prompt_chars = 7000
 
     def enabled(self) -> bool:
         return bool(self.api_key) and self.max_calls_per_cycle > 0 and self.max_calls_per_day > 0
@@ -42,10 +44,10 @@ class GeminiGuard:
     def _default_batch_size(self, model: str) -> int:
         m = str(model or "").lower()
         if "flash-lite" in m:
-            return 4
+            return 8
         if "flash" in m:
-            return 3
-        return 2
+            return 6
+        return 4
 
     def _load_state(self) -> dict[str, Any]:
         if not self.state_path.exists():
@@ -66,8 +68,10 @@ class GeminiGuard:
         if str(self._state.get("date", "")) != today:
             self._state["date"] = today
             self._state["calls_today"] = 0
+            self._state["tokens_today"] = 0
             self._state["dynamic_daily_cap"] = self._base_daily_cap
             self._state.pop("cooldown_until", None)
+            self._state["verdict_cache"] = {}
         cooldown_until = str(self._state.get("cooldown_until", "") or "").strip()
         if cooldown_until:
             try:
@@ -82,6 +86,12 @@ class GeminiGuard:
     def _record_call(self) -> None:
         self._state["calls_today"] = int(self._state.get("calls_today", 0)) + 1
         self._state["last_call_ts"] = datetime.now(timezone.utc).isoformat()
+        self._save_state()
+
+    def _record_tokens(self, tokens: int) -> None:
+        if tokens <= 0:
+            return
+        self._state["tokens_today"] = int(self._state.get("tokens_today", 0)) + int(tokens)
         self._save_state()
 
     def _record_rate_limit(self) -> None:
@@ -125,17 +135,78 @@ class GeminiGuard:
         ]
         for row in rows:
             decision = str(row.get("decision", "HOLD")).upper()
-            reasons = ", ".join([str(x) for x in (row.get("decision_reasons", []) or [])][:6])
+            reasons = ", ".join([str(x) for x in (row.get("decision_reasons", []) or [])][:10])
             lines.append(
                 (
                     f"- ticker={row.get('ticker','')} decision={decision} score={float(row.get('score',0.0)):.4f} "
                     f"signal_conf={float(row.get('signal_confidence',0.0)):.4f} atr_pct={float(row.get('atr_pct',0.0)):.5f} "
                     f"growth_20d={float(row.get('growth_20d',0.0)):.4f} daily_return={float(row.get('daily_return',0.0)):.6f} "
                     f"sentiment={float(row.get('sentiment',0.0)):.4f} position_size={float(row.get('position_size',0.0)):.4f} "
+                    f"mover_bucket={row.get('mover_bucket','')} social_posts={int(row.get('social_post_count',0) or 0)} "
+                    f"market_news={int(row.get('market_news_count',0) or 0)} "
                     f"reasons={reasons}"
                 )
             )
         return "\n".join(lines)
+
+    def _usage_tokens(self, payload: dict[str, Any]) -> int:
+        md = payload.get("usageMetadata", {}) or {}
+        vals = [
+            md.get("totalTokenCount", 0),
+            md.get("promptTokenCount", 0),
+            md.get("candidatesTokenCount", 0),
+        ]
+        for v in vals:
+            try:
+                n = int(v)
+                if n > 0:
+                    return n
+            except Exception:
+                continue
+        return 0
+
+    def _fingerprint(self, row: dict[str, Any]) -> str:
+        compact = {
+            "t": str(row.get("ticker", "")).upper(),
+            "s": round(float(row.get("score", 0.0) or 0.0), 4),
+            "c": round(float(row.get("signal_confidence", 0.0) or 0.0), 4),
+            "a": round(float(row.get("atr_pct", 0.0) or 0.0), 5),
+            "g": round(float(row.get("growth_20d", 0.0) or 0.0), 4),
+            "d": round(float(row.get("daily_return", 0.0) or 0.0), 5),
+            "p": round(float(row.get("position_size", 0.0) or 0.0), 4),
+        }
+        raw = json.dumps(compact, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+    def _cache_get(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        cache = self._state.get("verdict_cache", {}) or {}
+        key = self._fingerprint(row)
+        hit = cache.get(key)
+        if not isinstance(hit, dict):
+            return None
+        exp = str(hit.get("expires_at", "")).strip()
+        if not exp:
+            return None
+        try:
+            if datetime.now(timezone.utc) >= datetime.fromisoformat(exp):
+                return None
+        except Exception:
+            return None
+        return dict(hit.get("verdict", {}) or {})
+
+    def _cache_put(self, row: dict[str, Any], verdict: dict[str, Any], ttl_minutes: int = 90) -> None:
+        key = self._fingerprint(row)
+        cache = self._state.get("verdict_cache", {}) or {}
+        cache[key] = {
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=max(ttl_minutes, 5))).isoformat(),
+            "verdict": verdict,
+        }
+        if len(cache) > 400:
+            keys = list(cache.keys())
+            for k in keys[: max(len(cache) - 400, 0)]:
+                cache.pop(k, None)
+        self._state["verdict_cache"] = cache
+        self._save_state()
 
     def _extract_text(self, payload: dict[str, Any]) -> str:
         try:
@@ -197,7 +268,9 @@ class GeminiGuard:
             return None
         resp.raise_for_status()
         self._record_call()
-        text = self._extract_text(resp.json() or {})
+        payload = resp.json() or {}
+        self._record_tokens(self._usage_tokens(payload))
+        text = self._extract_text(payload)
         parsed = self._parse_json_result(text)
         if isinstance(parsed, dict):
             verdicts = parsed.get("verdicts", [])
@@ -214,14 +287,43 @@ class GeminiGuard:
         out = [dict(x) for x in analyses]
         buys = [x for x in out if str(x.get("decision", "HOLD")).upper() == "BUY"]
         buys.sort(key=lambda r: float(r.get("score", 0.0)), reverse=True)
+        pending: list[dict[str, Any]] = []
+        for row in buys:
+            cached = self._cache_get(row)
+            if cached:
+                row["gemini_cached"] = True
+                row["gemini_action"] = str(cached.get("action", "ALLOW")).upper()
+                row["gemini_confidence"] = round(float(cached.get("confidence", 0.0) or 0.0), 4)
+                action = row["gemini_action"]
+                reasons = list(row.get("decision_reasons", []) or [])
+                if action == "BLOCK":
+                    row["decision"] = "HOLD"
+                    reasons.append("gemini:block:cache")
+                elif action == "REDUCE":
+                    m = max(0.0, min(float(cached.get("size_mult", 1.0) or 1.0), 1.0))
+                    row["position_size"] = float(row.get("position_size", 0.0)) * m
+                    reasons.append(f"gemini:reduce:{m:.2f}:cache")
+                else:
+                    reasons.append("gemini:allow:cache")
+                row["decision_reasons"] = reasons
+            else:
+                pending.append(row)
         # Free-tier optimization: keep request count tiny; pack multiple tickers per call.
         request_budget = min(self.max_calls_per_cycle, 1)
         idx = 0
         for _ in range(request_budget):
-            batch = buys[idx : idx + max(self.max_tickers_per_request, 1)]
+            if idx >= len(pending):
+                break
+            batch = []
+            while idx < len(pending) and len(batch) < max(self.max_tickers_per_request, 1):
+                candidate = pending[idx]
+                trial = batch + [candidate]
+                if len(self._prompt_for_many(trial)) > self.max_prompt_chars and batch:
+                    break
+                batch.append(candidate)
+                idx += 1
             if not batch:
                 break
-            idx += len(batch)
             try:
                 verdicts = self._gemini_check_many(batch)
             except Exception as exc:
@@ -254,4 +356,14 @@ class GeminiGuard:
                 row["decision_reasons"] = reasons
                 row["gemini_action"] = action
                 row["gemini_confidence"] = round(conf, 4)
+                self._cache_put(
+                    row,
+                    {
+                        "action": action,
+                        "confidence": conf,
+                        "size_mult": size_mult,
+                        "reason": reason,
+                    },
+                    ttl_minutes=90,
+                )
         return out
