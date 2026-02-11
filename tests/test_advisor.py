@@ -75,17 +75,26 @@ class AdvisorSignalTests(unittest.TestCase):
         self.assertEqual(analyses[0]["ticker"], "AAA")
         self.assertEqual(analyses[0]["decision"], "BUY")
 
-    def test_build_candidate_list_keeps_prefetched_empty_frames_for_top20(self):
-        empty_map = {ticker: pd.DataFrame() for ticker in advisor.TOP20}
-
-        with patch("src.advisor.get_sp500_universe", return_value=list(advisor.TOP20)), patch(
-            "src.advisor.get_bulk_price_data", return_value=empty_map
+    def test_build_candidate_list_selects_top_gainers_and_losers(self):
+        symbols = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"]
+        price_map = {
+            "AAA": pd.DataFrame({"Close": [100.0, 90.0]}),   # -10%
+            "BBB": pd.DataFrame({"Close": [100.0, 80.0]}),   # -20%
+            "CCC": pd.DataFrame({"Close": [100.0, 95.0]}),   # -5%
+            "DDD": pd.DataFrame({"Close": [100.0, 120.0]}),  # +20%
+            "EEE": pd.DataFrame({"Close": [100.0, 110.0]}),  # +10%
+            "FFF": pd.DataFrame({"Close": [100.0, 105.0]}),  # +5%
+        }
+        with patch("src.advisor.get_sp500_universe", return_value=symbols), patch(
+            "src.advisor.get_bulk_price_data", return_value=price_map
         ):
-            candidates = advisor._build_candidate_list(universe_size=20, dip_scan_size=5)
+            candidates = advisor._build_candidate_list(universe_size=6, top_losers=2, top_gainers=2)
 
-        self.assertEqual(len(candidates), len(advisor.TOP20))
-        self.assertTrue(all(candidates[t]["data"] is not None for t in advisor.TOP20))
-        self.assertTrue(all(candidates[t]["data"].empty for t in advisor.TOP20))
+        self.assertEqual(set(candidates.keys()), {"BBB", "AAA", "DDD", "EEE"})
+        self.assertEqual(candidates["BBB"]["mover_bucket"], "LOSER")
+        self.assertEqual(candidates["AAA"]["mover_bucket"], "LOSER")
+        self.assertEqual(candidates["DDD"]["mover_bucket"], "GAINER")
+        self.assertEqual(candidates["EEE"]["mover_bucket"], "GAINER")
 
 
 if __name__ == "__main__":

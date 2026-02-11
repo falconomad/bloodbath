@@ -150,7 +150,7 @@ def run_sp500_cycle(decision, data):
     return sp500_manager.get_history_df(), sp500_manager.get_transactions_df()
 
 
-from src.core.sp500_list import TOP20, TOP20_SECTOR, get_sp500_universe
+from src.core.sp500_list import TOP20_SECTOR, get_sp500_universe
 from src.core.top20_manager import Top20AutoManager
 from src.settings import (
     ENABLE_POSITION_ROTATION,
@@ -197,57 +197,55 @@ def _rotating_fetch_universe(tickers, batch_size):
     return selected
 
 
-def _build_candidate_list(universe_size=120, dip_scan_size=60):
+def _latest_daily_return(data):
+    if data is None or data.empty or "Close" not in data:
+        return None
+    close = data["Close"].dropna()
+    if len(close) < 2:
+        return None
+    prev_close = float(close.iloc[-2])
+    last_close = float(close.iloc[-1])
+    if prev_close <= 0:
+        return None
+    return (last_close - prev_close) / prev_close
+
+
+def _build_candidate_list(universe_size=500, top_losers=10, top_gainers=10):
     base_universe = get_sp500_universe()
     universe_slice = base_universe[:universe_size]
-    fetch_universe = _rotating_fetch_universe(universe_slice, FETCH_BATCH_SIZE)
-    dip_candidates = []
+    fetch_universe = _rotating_fetch_universe(universe_slice, FETCH_BATCH_SIZE) if FETCH_BATCH_SIZE >= universe_size else universe_slice
 
     print(f"[cycle] Building candidates from {len(fetch_universe)} tickers")
     price_map = get_bulk_price_data(fetch_universe, period="6mo", interval="1d")
-
-    for ticker in fetch_universe:
-        data = price_map.get(ticker)
-        if data is None:
-            print(f"[cycle] {ticker}: missing bulk price data (None)")
+    movers = []
+    for ticker, data in price_map.items():
+        if data is None or data.empty:
             continue
-        if data.empty:
-            print(f"[cycle] {ticker}: data.empty=True in bulk price data")
+        daily_ret = _latest_daily_return(data)
+        if daily_ret is None:
             continue
+        movers.append((ticker, data, daily_ret))
 
+    losers = sorted(movers, key=lambda item: item[2])[: max(int(top_losers), 0)]
+    gainers = sorted(movers, key=lambda item: item[2], reverse=True)[: max(int(top_gainers), 0)]
+    selected = losers + [item for item in gainers if item[0] not in {row[0] for row in losers}]
+
+    print(
+        f"[cycle] Movers selected: losers={len(losers)} gainers={len(gainers)} "
+        f"from_ranked={len(movers)}"
+    )
+    final = {}
+    for ticker, data, daily_ret in selected:
         dip_score, drawdown, stabilized, volatility_penalty = dip_bonus(data)
-        if drawdown is None:
-            continue
-
-        if drawdown >= 0.2:
-            dip_candidates.append((ticker, data, dip_score, drawdown, stabilized, volatility_penalty))
-
-    print(f"[cycle] Dip candidates >=20% drawdown: {len(dip_candidates)}")
-    dip_candidates.sort(key=lambda item: item[3], reverse=True)
-    selected_dips = dip_candidates[:dip_scan_size]
-
-    top20_set = set(TOP20)
-    final = {
-        ticker: {
+        final[ticker] = {
             "data": data,
             "dip_score": dip_score,
             "drawdown": drawdown,
             "stabilized": stabilized,
             "volatility_penalty": volatility_penalty,
+            "daily_return": daily_ret,
+            "mover_bucket": "LOSER" if daily_ret < 0 else "GAINER",
         }
-        for ticker, data, dip_score, drawdown, stabilized, volatility_penalty in selected_dips
-    }
-
-    for ticker in top20_set:
-        if ticker not in final:
-            prefetched = price_map.get(ticker)
-            final[ticker] = {
-                "data": prefetched if prefetched is not None else pd.DataFrame(),
-                "dip_score": 0.0,
-                "drawdown": None,
-                "stabilized": False,
-                "volatility_penalty": 0.0,
-            }
 
     return final
 
