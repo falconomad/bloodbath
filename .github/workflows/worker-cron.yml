@@ -91,6 +91,7 @@ jobs:
       - name: Run worker script
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
