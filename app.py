@@ -1086,10 +1086,11 @@ st.subheader("Engine Flow Reference")
 st.caption("End-to-end trading engine flow (from data fetch to portfolio updates).")
 st.graphviz_chart(
     """
-    digraph EngineFlow {
+    digraph EngineFlow {{
       rankdir=TB;
-      node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#C9D2E3", fontname="Helvetica"];
-      edge [color="#7A8799"];
+      bgcolor="{bg}";
+      node [shape=box, style="rounded,filled", fillcolor="{card}", color="{border}", fontcolor="{text}", fontname="Helvetica"];
+      edge [color="{muted_text}", fontcolor="{muted_text}"];
 
       A [label="1) Data Fetch\\n(DB + external feeds)"];
       B [label="2) Feature Build\\n(price, ATR, sentiment, sector)"];
@@ -1106,6 +1107,6 @@ st.graphviz_chart(
       D -> E [label="within limits"];
       D -> J [label="if loss cap hit: liquidate/block buys"];
       E -> F -> G -> H -> I -> J;
-    }
-    """
+    }}
+    """.format(bg=bg, card=card, border=border, text=text, muted_text=muted_text)
 )
