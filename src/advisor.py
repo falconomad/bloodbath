@@ -9,6 +9,7 @@ from src.analysis.dip import dip_bonus
 from src.pipeline.decision_engine import (
     load_config,
 )
+from src.agent import GoalPolicy, apply_goal_policy_to_config
 from src.pipeline.recommendation_service import (
     atr_percent,
     generate_recommendation_core,
@@ -42,6 +43,7 @@ def _recent_growth_score(data, lookback=20):
 SCORING_CONFIG = load_config()
 _DECISION_STATE = {}
 _CYCLE_INDEX = 0
+
 
 
 def export_decision_state():
@@ -87,9 +89,11 @@ def generate_recommendation(
     apply_stability_gate=False,
     portfolio_context=None,
     market_news=None,
+    cfg=None,
 ):
     data = price_data if price_data is not None else get_price_data(ticker)
     headlines = news if news is not None else get_company_news(ticker, structured=True)
+    effective_cfg = cfg if cfg is not None else apply_goal_policy_to_config(SCORING_CONFIG, get_goal_snapshot())
     return generate_recommendation_core(
         ticker=ticker,
         data=data,
@@ -97,7 +101,7 @@ def generate_recommendation(
         dip_meta=dip_meta,
         cycle_idx=cycle_idx,
         apply_stability_gate=apply_stability_gate,
-        cfg=SCORING_CONFIG,
+        cfg=effective_cfg,
         decision_state=_DECISION_STATE,
         portfolio_context=portfolio_context,
         market_news=market_news,
@@ -155,6 +159,10 @@ from src.core.top20_manager import Top20AutoManager
 from src.execution.safeguards import ExecutionSafeguard
 from src.execution.gemini_guard import GeminiGuard
 from src.settings import (
+    AGENT_GOAL_HORIZON_DAYS,
+    AGENT_GOAL_START_CAPITAL,
+    AGENT_GOAL_START_DATE,
+    AGENT_GOAL_TARGET_CAPITAL,
     ENABLE_POSITION_ROTATION,
     STARTING_CAPITAL,
     TOP20_MIN_BUY_SCORE,
@@ -201,12 +209,23 @@ top20_manager = Top20AutoManager(
     rotation_sell_fraction=0.35,
     rotation_max_swaps_per_step=1,
 )
+goal_policy = GoalPolicy(
+    start_capital=AGENT_GOAL_START_CAPITAL,
+    target_capital=AGENT_GOAL_TARGET_CAPITAL,
+    horizon_days=AGENT_GOAL_HORIZON_DAYS,
+    start_date=(AGENT_GOAL_START_DATE or None),
+)
 execution_safeguard = ExecutionSafeguard(
     max_consecutive_failures=EXECUTION_MAX_CONSECUTIVE_FAILURES,
     stale_data_max_age_hours=EXECUTION_STALE_DATA_MAX_AGE_HOURS,
     anomaly_zscore_threshold=EXECUTION_ANOMALY_ZSCORE_THRESHOLD,
     max_cycle_notional_turnover=EXECUTION_MAX_CYCLE_NOTIONAL_TURNOVER,
 )
+
+
+def get_goal_snapshot(current_capital=None):
+    capital = float(current_capital if current_capital is not None else top20_manager.portfolio_value())
+    return goal_policy.snapshot(current_capital=capital)
 gemini_guard = GeminiGuard(
     api_key=GEMINI_API_KEY,
     model=GEMINI_MODEL,
@@ -408,6 +427,13 @@ def run_top20_cycle_with_signals():
     _CYCLE_INDEX += 1
     reset_cycle_caches()
     analyses = []
+    goal_snapshot = get_goal_snapshot()
+    effective_cfg = apply_goal_policy_to_config(SCORING_CONFIG, goal_snapshot)
+    print(
+        f"[cycle][goal] current={goal_snapshot.current_capital:.2f} target={goal_snapshot.target_capital:.2f} "
+        f"remaining={goal_snapshot.remaining_capital:.2f} days_left={goal_snapshot.days_remaining:.2f} "
+        f"pace={goal_snapshot.pace_multiplier:.3f}"
+    )
     if LOSER_HUNTER_ENABLED:
         candidates = _build_candidate_list(
             universe_size=max(int(LOSER_UNIVERSE_SIZE), 50),
@@ -444,6 +470,7 @@ def run_top20_cycle_with_signals():
             apply_stability_gate=True,
             portfolio_context=_portfolio_risk_context_for_ticker(ticker, analyses, candidates),
             market_news=cycle_market_news,
+            cfg=effective_cfg,
         )
         final_score = float(rec["composite_score"])
         signal_conf = float(rec.get("signal_confidence", 0.0))
@@ -472,6 +499,9 @@ def run_top20_cycle_with_signals():
                 "signal_confidence": round(signal_conf, 4),
                 "position_size": float(rec.get("position_size", 0.0)),
                 "decision_reasons": rec.get("decision_reasons", []),
+                "goal_remaining_capital": round(float(goal_snapshot.remaining_capital), 2),
+                "goal_days_remaining": round(float(goal_snapshot.days_remaining), 2),
+                "goal_pace_multiplier": round(float(goal_snapshot.pace_multiplier), 4),
             }
         )
         analysis, overridden = _apply_loser_hunter_rebound_override(meta, analysis)
@@ -607,7 +637,7 @@ def run_manual_ticker_check_with_inputs(
         dip_meta=dip_meta,
         cycle_idx=max(int(_CYCLE_INDEX), 1),
         apply_stability_gate=True,
-        cfg=SCORING_CONFIG,
+        cfg=apply_goal_policy_to_config(SCORING_CONFIG, get_goal_snapshot()),
         decision_state={},
         portfolio_context=_portfolio_risk_context_for_ticker(symbol, [], candidate_ctx),
         market_news=market_news if market_news is not None else get_market_sentiment_news(limit=12),

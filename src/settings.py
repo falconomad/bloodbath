@@ -1,4 +1,10 @@
 import os
+from pathlib import Path
+
+try:
+    import yaml
+except Exception:  # pragma: no cover
+    yaml = None
 
 
 def _float_from_env(name, default):
@@ -94,3 +100,32 @@ LOSER_REQUIRE_STABILIZATION = True
 LOSER_MIN_DIP_SCORE = 0.05
 LOSER_INCLUDE_GAINERS = False
 LOSER_PROFIT_ALERT_PCT = 0.05
+
+
+def _load_goal_config():
+    defaults = {
+        "start_capital": STARTING_CAPITAL,
+        "target_capital": max(STARTING_CAPITAL * 1.05, STARTING_CAPITAL),
+        "horizon_days": 7,
+        "start_date": "",
+    }
+    path = Path("config/agent_goal.yaml")
+    if yaml is None or not path.exists():
+        return defaults
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+    except Exception:
+        return defaults
+    out = dict(defaults)
+    for k in out:
+        if k in loaded and loaded[k] is not None:
+            out[k] = loaded[k]
+    return out
+
+
+_GOAL_CFG = _load_goal_config()
+AGENT_GOAL_START_CAPITAL = _float_from_env("AGENT_GOAL_START_CAPITAL", _GOAL_CFG["start_capital"])
+AGENT_GOAL_TARGET_CAPITAL = _float_from_env("AGENT_GOAL_TARGET_CAPITAL", _GOAL_CFG["target_capital"])
+AGENT_GOAL_HORIZON_DAYS = _int_from_env("AGENT_GOAL_HORIZON_DAYS", _GOAL_CFG["horizon_days"])
+AGENT_GOAL_START_DATE = _str_from_env("AGENT_GOAL_START_DATE", _GOAL_CFG["start_date"]).strip()

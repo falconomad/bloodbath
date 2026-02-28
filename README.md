@@ -7,6 +7,7 @@ Features:
 - Event detection (with upcoming earnings calendar boost)
 - Complex scoring engine
 - Streamlit dashboard
+- Goal-driven agent pacing (capital target + deadline)
 
 Setup:
 
@@ -24,8 +25,20 @@ Setup:
    These are applied to buys/sells in simulation.
 6. Optional rotating fetch: `FETCH_BATCH_SIZE` (default `20`, which means no rotation for TOP20).
    - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
-7. `pip install -r requirements.txt`
-8. `streamlit run app.py`
+7. Configure objective in `config/agent_goal.yaml` (or env overrides):
+   - `start_capital`
+   - `target_capital`
+   - `horizon_days`
+   - `start_date` (optional ISO-8601)
+8. Goal env overrides (optional):
+   - `AGENT_GOAL_START_CAPITAL`
+   - `AGENT_GOAL_TARGET_CAPITAL`
+   - `AGENT_GOAL_HORIZON_DAYS`
+   - `AGENT_GOAL_START_DATE`
+9. Dashboard entrypoint:
+   - `streamlit run frontend/streamlit_app.py`
+   - legacy entrypoint `streamlit run app.py` still works
+10. `pip install -r requirements.txt`
 
 Fresh Start (Reset State + Set Capital):
 

@@ -13,6 +13,7 @@ from src.db import claim_worker_run, get_connection, init_db
 from src.advisor import (
     export_decision_state,
     get_cycle_index,
+    get_goal_snapshot,
     import_decision_state,
     run_top20_cycle_with_signals,
     set_cycle_index,
@@ -85,6 +86,22 @@ def save(history, transactions, positions, analyses):
 
     if analyses:
         c.execute("DELETE FROM recommendation_signals")
+        goal = get_goal_snapshot(float(top20_manager.portfolio_value()))
+        c.execute(
+            """
+            INSERT INTO agent_goal_snapshots (
+                current_capital, target_capital, remaining_capital, days_remaining, required_daily_return, pace_multiplier
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                float(goal.current_capital),
+                float(goal.target_capital),
+                float(goal.remaining_capital),
+                float(goal.days_remaining),
+                float(goal.required_daily_return),
+                float(goal.pace_multiplier),
+            ),
+        )
         for a in analyses:
             c.execute(
                 """
@@ -100,6 +117,23 @@ def save(history, transactions, positions, analyses):
                     float(a["price"]),
                     str(a.get("mover_bucket", "OTHER")),
                     float(a.get("daily_return", 0.0)),
+                ),
+            )
+            c.execute(
+                """
+                INSERT INTO trade_decisions (
+                    ticker, decision, score, signal_confidence, position_size, reason_codes, expected_edge, price
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    a["ticker"],
+                    str(a.get("decision", "HOLD")),
+                    float(a.get("score", 0.0)),
+                    float(a.get("signal_confidence", 0.0)),
+                    float(a.get("position_size", 0.0)),
+                    ",".join([str(x) for x in (a.get("decision_reasons", []) or [])])[:4000],
+                    float(abs(a.get("score", 0.0)) * a.get("signal_confidence", 0.0)),
+                    float(a.get("price", 0.0)),
                 ),
             )
 

@@ -10,7 +10,15 @@ from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from src.db import get_connection, init_db
-from src.settings import STARTING_CAPITAL, LOSER_PROFIT_ALERT_PCT, LOSER_HUNTER_ENABLED, LOSER_MIN_DROP_PCT, LOSER_TOP_K
+from src.settings import (
+    AGENT_GOAL_HORIZON_DAYS,
+    AGENT_GOAL_TARGET_CAPITAL,
+    LOSER_HUNTER_ENABLED,
+    LOSER_MIN_DROP_PCT,
+    LOSER_PROFIT_ALERT_PCT,
+    LOSER_TOP_K,
+    STARTING_CAPITAL,
+)
 from src.common.trace_utils import load_jsonl_dict_rows
 from src.analytics.explainability_report import generate_explainability_report
 from src.ui.stock_logos import get_logo_url
@@ -696,11 +704,21 @@ if db_ready:
             """,
             conn,
         )
+        goal_snapshots = pd.read_sql(
+            """
+            SELECT *
+            FROM agent_goal_snapshots
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            conn,
+        )
     except Exception:
         portfolio = pd.DataFrame()
         transactions = pd.DataFrame()
         positions = pd.DataFrame()
         signals = pd.DataFrame()
+        goal_snapshots = pd.DataFrame()
     finally:
         conn.close()
 
@@ -726,6 +744,7 @@ else:
     positions = pd.DataFrame()
     signals = pd.DataFrame()
     manual_checks = pd.DataFrame()
+    goal_snapshots = pd.DataFrame()
 
 skeleton_placeholder.empty()
 
@@ -827,6 +846,28 @@ if not portfolio.empty:
     c2.metric("Net Return", f"{change_pct:+.2f}%")
     c3.metric("Tracked Cycles", f"{len(portfolio)}")
     c4.metric("Current Drawdown", f"{100 * latest_drawdown:.2f}%")
+
+    goal_current = latest
+    goal_target = float(AGENT_GOAL_TARGET_CAPITAL)
+    goal_remaining = max(goal_target - goal_current, 0.0)
+    goal_days_left = float(AGENT_GOAL_HORIZON_DAYS)
+    goal_required_daily = 0.0
+    if not goal_snapshots.empty:
+        row = goal_snapshots.iloc[0]
+        goal_target = float(row.get("target_capital", goal_target))
+        goal_remaining = max(float(row.get("remaining_capital", goal_remaining)), 0.0)
+        goal_days_left = max(float(row.get("days_remaining", goal_days_left)), 0.0)
+        goal_required_daily = max(float(row.get("required_daily_return", 0.0)), 0.0)
+    else:
+        goal_days_left = float(AGENT_GOAL_HORIZON_DAYS)
+        if goal_current > 0 and goal_days_left > 0:
+            goal_required_daily = (goal_remaining / goal_current) / goal_days_left
+
+    gk1, gk2, gk3, gk4 = st.columns(4)
+    gk1.metric("Goal Target", f"${goal_target:,.2f}")
+    gk2.metric("Remaining to Goal", f"${goal_remaining:,.2f}")
+    gk3.metric("Days Remaining", f"{goal_days_left:.2f}")
+    gk4.metric("Required Daily Return", f"{100.0 * goal_required_daily:.2f}%")
 
     g1, g2 = st.columns([2, 1])
     with g1:

@@ -121,6 +121,38 @@ def init_db():
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS agent_goal_snapshots (
+            id BIGSERIAL PRIMARY KEY,
+            ts TIMESTAMPTZ DEFAULT NOW(),
+            current_capital REAL,
+            target_capital REAL,
+            remaining_capital REAL,
+            days_remaining REAL,
+            required_daily_return REAL,
+            pace_multiplier REAL
+        );
+    """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trade_decisions (
+            id BIGSERIAL PRIMARY KEY,
+            ts TIMESTAMPTZ DEFAULT NOW(),
+            ticker TEXT,
+            decision TEXT,
+            score REAL,
+            signal_confidence REAL,
+            position_size REAL,
+            reason_codes TEXT,
+            expected_edge REAL,
+            price REAL
+        );
+    """
+    )
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS manual_ticker_checks (
             id BIGSERIAL PRIMARY KEY,
             ticker TEXT,

@@ -1,0 +1,5 @@
+start_capital: 2000
+target_capital: 2100
+horizon_days: 7
+# Optional ISO-8601 start date, for example 2026-02-28T00:00:00+00:00
+start_date:

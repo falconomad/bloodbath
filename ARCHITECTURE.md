@@ -1,21 +1,30 @@
 # Architecture
 
 ## Overview
-This project is organized as a signal-to-decision trading pipeline with clear stage boundaries:
+This project is organized as a goal-driven trading agent with clear stage boundaries:
 
 1. Data ingestion
 2. Validation and normalization
 3. Signal generation
-4. Scoring and decisioning
+4. Goal-aware scoring and decisioning
 5. Portfolio execution
-6. Trace logging, analytics, and experimentation
+6. Trace logging and learning memory
 
 ## Core Runtime Flow
 - `src/advisor.py`
-  - Orchestrates cycle execution (`run_top20_cycle_with_signals`)
+  - Orchestrates cycle execution (`run_top20_cycle_with_signals`) as compatibility facade
   - Fetches candidate universes and market/news inputs
   - Delegates recommendation logic to `src/pipeline/recommendation_service.py`
+  - Applies goal policy overlays from `src/agent/goal_policy.py`
   - Passes final analyses to `src/core/top20_manager.py`
+
+- `src/agent/goal_policy.py`
+  - Tracks objective pace (`start_capital`, `target_capital`, deadline horizon)
+  - Computes progress, required daily return, and pacing multiplier
+
+- `src/agent/decision_engine.py`
+  - Applies goal-based threshold/position-size adjustments to the base scoring config
+  - Keeps `config/weights.yaml` as the stable base policy
 
 - `src/pipeline/recommendation_service.py`
   - Builds normalized module signals (trend, sentiment, events, micro, dip, volatility)
@@ -53,6 +62,9 @@ This project is organized as a signal-to-decision trading pipeline with clear st
 - `src/db.py`
   - DB initialization and worker dedupe key
   - Tables for portfolio, transactions, snapshots, signals
+  - Goal and learning tables:
+    - `agent_goal_snapshots`
+    - `trade_decisions`
   - Decision memory persistence tables:
     - `decision_memory`
     - `decision_engine_meta`
