@@ -11,6 +11,15 @@ This project is organized as a goal-driven trading agent with clear stage bounda
 6. Trace logging and learning memory
 
 ## Core Runtime Flow
+- `frontend/react`
+  - Primary web UI for deployment (Netlify-ready)
+  - Calls `api/server.py` JSON endpoints
+
+- `api/server.py`
+  - FastAPI backend exposing trading state and control endpoints
+  - Reads/writes Postgres via `src/db.py`
+  - Can trigger and persist a full agent cycle
+
 - `src/advisor.py`
   - Orchestrates cycle execution (`run_top20_cycle_with_signals`) as compatibility facade
   - Fetches candidate universes and market/news inputs

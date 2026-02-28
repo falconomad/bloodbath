@@ -12,3 +12,5 @@ finnhub-python
 psycopg2-binary
 PyYAML
 scikit-learn
+fastapi
+uvicorn

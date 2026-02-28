@@ -8,6 +8,7 @@ Features:
 - Complex scoring engine
 - Streamlit dashboard
 - Goal-driven agent pacing (capital target + deadline)
+- React dashboard (Netlify-ready) + Python API
 
 Setup:
 
@@ -35,10 +36,38 @@ Setup:
    - `AGENT_GOAL_TARGET_CAPITAL`
    - `AGENT_GOAL_HORIZON_DAYS`
    - `AGENT_GOAL_START_DATE`
-9. Dashboard entrypoint:
+9. API backend:
+   - `pip install -r requirements.txt`
+   - `uvicorn api.server:app --host 0.0.0.0 --port 8000`
+10. React frontend:
+   - `cd frontend/react`
+   - `npm install`
+   - `cp .env.example .env` and set `VITE_API_BASE_URL`
+   - `npm run dev`
+11. Legacy Streamlit dashboard:
    - `streamlit run frontend/streamlit_app.py`
-   - legacy entrypoint `streamlit run app.py` still works
-10. `pip install -r requirements.txt`
+   - `streamlit run app.py` (legacy entrypoint)
+
+Netlify deploy (React app):
+
+- Base directory: `frontend/react`
+- Build command: `npm run build`
+- Publish directory: `dist`
+- Environment variable:
+  - `VITE_API_BASE_URL=https://<your-backend-domain>`
+
+Backend endpoints (summary):
+
+- `GET /health`
+- `GET /api/portfolio`
+- `GET /api/transactions`
+- `GET /api/positions`
+- `GET /api/signals`
+- `GET /api/goal/latest`
+- `GET /api/manual-checks`
+- `POST /api/manual-checks`
+- `DELETE /api/manual-checks/{ticker}`
+- `POST /api/cycle/run`
 
 Fresh Start (Reset State + Set Capital):
 

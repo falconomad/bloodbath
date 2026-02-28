@@ -201,6 +201,12 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# macOS metadata
+.DS_Store
+
+# frontend artifacts
+frontend/react/node_modules/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
