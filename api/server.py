@@ -3,17 +3,17 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from typing import Any
+import logging
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.db import get_connection, init_db
-from src.advisor import run_manual_ticker_check, run_top20_cycle_with_signals
-from worker.auto_worker import save as persist_cycle
 
 
 app = FastAPI(title="kaibot-api", version="1.0.0")
+logger = logging.getLogger("kaibot-api")
 
 cors_origins = [x.strip() for x in os.getenv("API_CORS_ORIGINS", "*").split(",") if x.strip()]
 app.add_middleware(
@@ -42,7 +42,11 @@ def _fetch_rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]
 
 @app.on_event("startup")
 def startup() -> None:
-    init_db()
+    # Do not fail process startup on DB cold-start/network hiccups.
+    try:
+        init_db()
+    except Exception as exc:  # pragma: no cover
+        logger.exception("startup init_db failed: %s", exc)
 
 
 @app.get("/health")
@@ -102,6 +106,8 @@ def add_manual_check(payload: ManualCheckRequest) -> dict[str, Any]:
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
 
+    from src.advisor import run_manual_ticker_check
+
     rec = run_manual_ticker_check(ticker)
     conn = get_connection()
     cur = conn.cursor()
@@ -151,6 +157,9 @@ def delete_manual_check(ticker: str) -> dict[str, Any]:
 
 @app.post("/api/cycle/run")
 def run_cycle() -> dict[str, Any]:
+    from src.advisor import run_top20_cycle_with_signals
+    from worker.auto_worker import save as persist_cycle
+
     history, transactions, positions, analyses = run_top20_cycle_with_signals()
     persist_cycle(history, transactions, positions, analyses)
     return {
