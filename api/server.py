@@ -30,14 +30,28 @@ class ManualCheckRequest(BaseModel):
 
 
 def _fetch_rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(query, params)
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return rows
+    def _run() -> list[dict[str, Any]]:
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(query, params)
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+
+    try:
+        return _run()
+    except Exception as exc:
+        # If startup DB init failed during cold start, try to self-heal once.
+        logger.exception("query failed, attempting init_db retry: %s", exc)
+        try:
+            init_db()
+            return _run()
+        except Exception as retry_exc:
+            logger.exception("query failed after retry: %s", retry_exc)
+            raise HTTPException(status_code=503, detail=f"database unavailable: {retry_exc}")
 
 
 @app.on_event("startup")
