@@ -124,7 +124,7 @@ def execute_trades(recommendation):
                 symbol=symbol,
                 qty=float(qty),
                 side=side,
-                time_in_force=TimeInForce.GTC
+                time_in_force=TimeInForce.DAY
             )
             order = trading_client.submit_order(req)
             print(f"Successfully submitted order: {action.upper()} {qty} of {symbol}")
