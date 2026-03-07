@@ -1,2 +1,2 @@
 alpaca-py
-google-generativeai
+google-genai

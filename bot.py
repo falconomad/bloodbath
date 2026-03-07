@@ -1,6 +1,6 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -20,7 +20,7 @@ if not ALPACA_API_KEY or not ALPACA_API_SECRET or not GEMINI_API_KEY:
 # Note: we use paper=True by default for safety. Set paper=False for live trading if desired.
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_API_SECRET)
-genai.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Trading parameters
 WATCHLIST = ['NVDA', 'TSLA', 'AMD', 'AAPL', 'COIN', 'META']
@@ -64,8 +64,6 @@ def get_market_state():
     }
 
 def get_ai_recommendation(market_state):
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
     prompt = f"""
     You are an aggressive algorithmic trading bot. You need to make quick, profitable decisions based on the current market state and my portfolio.
     Your goal is to maximize short-term profit.
@@ -88,8 +86,11 @@ def get_ai_recommendation(market_state):
     Respond ONLY with the JSON code block. Do not include markdown formatting or any other text before or after the JSON.
     """
     
-    response = model.generate_content(prompt)
     try:
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
         # Strip markdown if present
         text = response.text.strip()
         if text.startswith('```json'):
@@ -102,7 +103,8 @@ def get_ai_recommendation(market_state):
         return json.loads(text)
     except Exception as e:
         print(f"Error parsing Gemini response: {e}")
-        print(f"Raw response: {response.text}")
+        if 'response' in locals() and hasattr(response, 'text'):
+             print(f"Raw response: {response.text}")
         return {"trades": []}
 
 def execute_trades(recommendation):
@@ -141,8 +143,12 @@ def main():
     recommendation = get_ai_recommendation(state)
     print(f"Recommendation: {json.dumps(recommendation, indent=2)}")
     
-    print("Executing trades...")
-    execute_trades(recommendation)
+    if recommendation and "trades" in recommendation and len(recommendation["trades"]) > 0:
+        print("Executing trades...")
+        execute_trades(recommendation)
+    else:
+        print("No trades recommended.")
+        
     print("Done.")
 
 if __name__ == "__main__":
