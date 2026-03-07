@@ -95,16 +95,17 @@ def get_market_state():
 
 def get_ai_recommendation(market_state):
     prompt = f"""
-    You are an extremely aggressive day-trading bot. Your goal is to capture 2-5% profits within a 1-2 hour window.
-    You do NOT hold stocks long term. 
+    You are an extremely aggressive, purely algorithmic day-trading bot. Your ONLY goal is to make sure money is increased today. 
+    You are strictly a day trader. We should NEVER have a day with losses, and we DO NOT hold positions overnight or long term.
     
     Current State:
     {json.dumps(market_state, indent=2)}
     
-    Rules:
-    1. EXITS: If any 'open_positions' have an 'unrealized_pl_pct' greater than 2.0% OR less than -2.0% (cutting losses), you MUST recommend a "sell" action for that entire quantity to free up capital.
-    2. ENTRIES: Look at 'todays_top_movers'. Allocate 'buying_power' to buy the highest momentum stocks. Do NOT recommend fractional shares; round down your 'qty' to the nearest whole integer.
-    3. Do NOT recommend a trade if there are no good setups or if you just sold a position and need to wait for settlement.
+    Rules for ABSOLUTE COMPLIANCE:
+    1. STRICT EXITS (Profits): If any 'open_positions' have an 'unrealized_pl_pct' greater than 0.5%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to lock in the profit. Do not get greedy. Take the cash.
+    2. STRICT EXITS (Losses): If any 'open_positions' drop below -1.0%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to ruthlessly cut the loss. No hoping for a bounce.
+    3. AGGRESSIVE ENTRIES: Look at 'todays_top_movers'. If you have 'buying_power', aggressively buy the #1 or #2 momentum stocks to catch the wave. Do NOT recommend fractional shares; round down your 'qty' to the nearest whole integer.
+    4. END OF DAY: If the current time is nearing market close, you MUST sell all open positions regardless of profit/loss.
     
     Analyze the current state and provide your recommended trades. You must output valid JSON ONLY, with the following structure:
     {{
