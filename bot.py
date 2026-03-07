@@ -6,6 +6,10 @@ from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest, StockSnapshotRequest
+from alpaca.data.screener.screener import ScreenerClient
+from alpaca.data.screener.requests import ScreenerRequest
+from alpaca.data.screener.filter import ScreenerFilter, ScreenerFilterCondition
+import alpaca.data.screener.filter as filters
 from datetime import datetime, timedelta, timezone
 
 # API Keys
@@ -17,48 +21,44 @@ if not ALPACA_API_KEY or not ALPACA_API_SECRET or not GEMINI_API_KEY:
     print("Missing API keys. Please set ALPACA_API_KEY, ALPACA_API_SECRET, and GEMINI_API_KEY.")
     exit(1)
 
-# Initialize Clients
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_API_SECRET)
+screener_client = ScreenerClient(ALPACA_API_KEY, ALPACA_API_SECRET)
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_top_movers(limit=15):
     """
-    Since regular API doesn't have a direct 'screener' endpoint natively exposed in alpaca-py easily,
-    we will look at a broader set of liquid large/mid-cap tech and meme stocks that have high volatility, 
-    and fetch their snapshots to dynamically act as our daily screener.
+    Dynamically scan the market for the top gainers of the day.
     """
-    POTENTIAL_MOVERS = [
-        'NVDA', 'TSLA', 'AMD', 'AAPL', 'COIN', 'META', 'MSTR', 'SMCI', 'PLTR', 'MARA', 
-        'RIOT', 'SOFI', 'HOOD', 'RDDT', 'ARM', 'AVGO', 'MU', 'INTC', 'AMZN', 'GOOGL',
-        'NFLX', 'CRWD', 'PANW', 'SNOW', 'DDOG', 'NET', 'RBLX', 'PATH', 'U', 'DKNG'
-    ]
-    
-    req = StockSnapshotRequest(symbol_or_symbols=POTENTIAL_MOVERS)
     try:
-        snapshots = data_client.get_stock_snapshot(req)
+        # We can construct a simple screener request.
+        # Alternatively, if screener is restrictive, we can fetch all snapshots
+        # However, Alpaca's Screener client provides `get_top_movers` endpoints.
+        # Let's utilize the native Top Movers screener:
+        
+        req = ScreenerRequest(
+            sort_by=filters.MoversSort.PERCENT_CHANGE,
+            direction=filters.SortDirection.DESC,
+            limit=limit,
+            type=filters.MoversType.GAINERS
+        )
+        
+        response = screener_client.get_top_movers(req)
+        
+        movers = []
+        for mover in response.movers:
+            movers.append({
+                "symbol": mover.symbol,
+                "price": float(mover.price),
+                "change_pct": float(mover.percent_change),
+                "volume": int(mover.volume)
+            })
+            
+        return movers
+        
     except Exception as e:
-        print(f"Error fetching snapshots: {e}")
+        print(f"Error fetching top movers via Screener API: {e}")
         return []
-
-    movers = []
-    for symbol, snapshot in snapshots.items():
-        if snapshot.daily_bar and snapshot.previous_daily_bar:
-            # Calculate daily change percentage
-            prev_close = float(snapshot.previous_daily_bar.close)
-            current = float(snapshot.latest_trade.price)
-            if prev_close > 0:
-                change_pct = float(((current - prev_close) / prev_close) * 100)
-                movers.append({
-                    "symbol": str(symbol),
-                    "price": current,
-                    "change_pct": round(change_pct, 2),
-                    "volume": int(snapshot.daily_bar.volume)
-                })
-    
-    # Sort by highest gainers first
-    movers.sort(key=lambda x: x["change_pct"], reverse=True)
-    return list(movers)[:limit]
 
 def get_market_state():
     # Get account info
