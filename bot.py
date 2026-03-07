@@ -9,17 +9,17 @@ from alpaca.data.requests import StockLatestQuoteRequest
 
 # API Keys
 ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
-ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY')
+ALPACA_API_SECRET = os.environ.get('ALPACA_API_SECRET')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-if not ALPACA_API_KEY or not ALPACA_SECRET_KEY or not GEMINI_API_KEY:
-    print("Missing API keys. Please set ALPACA_API_KEY, ALPACA_SECRET_KEY, and GEMINI_API_KEY.")
+if not ALPACA_API_KEY or not ALPACA_API_SECRET or not GEMINI_API_KEY:
+    print("Missing API keys. Please set ALPACA_API_KEY, ALPACA_API_SECRET, and GEMINI_API_KEY.")
     exit(1)
 
 # Initialize Clients
 # Note: we use paper=True by default for safety. Set paper=False for live trading if desired.
-trading_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=True)
-data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
+data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_API_SECRET)
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Trading parameters
