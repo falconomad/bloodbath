@@ -1,4 +1,5 @@
 import json
+import time
 import config
 from data_ingestion import market_data, news_feed, calendar_events
 from ai_engines import technical_analyst, sentiment_analyst, executive_board
@@ -109,6 +110,9 @@ def main():
         print(f"      -> Reasoning: {exec_decision.get('chain_of_thought', '')}")
         
         final_recommendations.append(exec_decision)
+        
+        print(f"   ⏱️ Sleeping {config.API_SLEEP_SECONDS}s to respect Gemini API Rate Limits...")
+        time.sleep(config.API_SLEEP_SECONDS)
 
     # ---------------------------------------------------------
     # 5. RISK MANAGEMENT & EXECUTION

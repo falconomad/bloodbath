@@ -11,7 +11,13 @@ if not ALPACA_API_KEY or not ALPACA_API_SECRET or not GEMINI_API_KEY:
 
 # Global Settings
 PAPER_TRADING = True
-MAX_ALLOCATION_PCT = 20  # Never allocate more than 20% of buying power to a single ticker
-PROFIT_TAKE_PCT = 1.5    # Strict exit at 1.5% profit
-STOP_LOSS_PCT = -1.0     # Strict exit at -1.0% loss
+
+# Hardcoded Trading Rules & Risk Management limits
+MAX_ALLOCATION_PCT = 20 # Never put more than 20% of buying power into a single trade
+PROFIT_TAKE_PCT = 5.0 # Pre-emptive sell if unrealized P/L is over +5%
+STOP_LOSS_PCT = -3.0 # Pre-emptive exit if unrealized P/L drops below -3%
+
+# Free Tier Rate Limits (Gemini Flash allows 15 Requests Per Minute)
+# We make 3 calls per ticker, so we need to spread them out.
+API_SLEEP_SECONDS = 15 # 15s per loop iteration = 4 requests per minute = safess
 MACRO_DOWNTURN_LIMIT = -2.0 # Halt buying if SPY is down > 2%
