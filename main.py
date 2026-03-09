@@ -7,6 +7,61 @@ from execution import risk_manager, telemetry, trade_executor
 from alpaca.trading.client import TradingClient
 
 
+def _snapshot_account(account_obj, buying_power=None):
+    eq = float(getattr(account_obj, "equity", 0.0) or 0.0)
+    last_eq = float(getattr(account_obj, "last_equity", eq) or eq)
+    return {
+        "equity": eq,
+        "last_equity": last_eq,
+        "buying_power": float(buying_power if buying_power is not None else getattr(account_obj, "buying_power", 0.0) or 0.0),
+        "cash": float(getattr(account_obj, "cash", 0.0) or 0.0),
+    }
+
+
+def _snapshot_positions(position_objs):
+    rows = []
+    for p in (position_objs or []):
+        rows.append(
+            {
+                "symbol": str(getattr(p, "symbol", "")),
+                "qty": float(getattr(p, "qty", 0.0) or 0.0),
+                "market_value": float(getattr(p, "market_value", 0.0) or 0.0),
+                "unrealized_pl_pct": float(getattr(p, "unrealized_plpc", 0.0) or 0.0) * 100,
+                "unrealized_pl": float(getattr(p, "unrealized_pl", 0.0) or 0.0),
+                "current_price": float(getattr(p, "current_price", 0.0) or 0.0),
+            }
+        )
+    return rows
+
+
+def _write_profit_summary(trading_client, fallback_account_snapshot, fallback_positions_snapshot, trades_executed, run_status):
+    try:
+        refreshed_account = trading_client.get_account()
+        refreshed_positions = trading_client.get_all_positions()
+        account_snapshot = _snapshot_account(refreshed_account)
+        positions_snapshot = _snapshot_positions(refreshed_positions)
+    except Exception:
+        account_snapshot = dict(fallback_account_snapshot or {})
+        positions_snapshot = list(fallback_positions_snapshot or [])
+
+    summary = telemetry.update_profit_summary(
+        account_snapshot=account_snapshot,
+        positions_snapshot=positions_snapshot,
+        trades_executed=trades_executed,
+        run_status=run_status,
+        path=config.PROFIT_SUMMARY_PATH,
+        baseline_equity_hint=float(config.BASELINE_EQUITY),
+    )
+    telemetry.log_event("profit_summary", summary, path=config.ENGINE_EVENTS_PATH)
+    print(
+        "📘 Profit Summary: "
+        f"equity=${summary['equity']:,.2f} | "
+        f"total=${summary['total_profit_since_baseline']:,.2f} ({summary['total_return_since_baseline_pct']:.2f}%) | "
+        f"daily=${summary['daily_profit']:,.2f} ({summary['daily_profit_pct']:.2f}%) | "
+        f"open_unrealized=${summary['unrealized_pl_open_positions']:,.2f}"
+    )
+
+
 def _forced_exit_recommendations(current_positions):
     forced = []
     for p in (current_positions or []):
@@ -60,15 +115,7 @@ def main():
         print(f"🕒 Market Open: {market_open}")
         
         positions = trading_client.get_all_positions()
-        current_positions = []
-        for p in positions:
-            current_positions.append({
-                "symbol": p.symbol,
-                "qty": float(p.qty),
-                "market_value": float(p.market_value),
-                "unrealized_pl_pct": float(p.unrealized_plpc) * 100,
-                "current_price": float(p.current_price)
-            })
+        current_positions = _snapshot_positions(positions)
         print(f"📊 Open Positions: {len(current_positions)}")
         for pos in current_positions:
             print(f"   - {pos['symbol']}: {pos['unrealized_pl_pct']:.2f}% P/L")
@@ -76,6 +123,7 @@ def main():
     except Exception as e:
         print(f"❌ Failed to fetch account state: {e}")
         return
+    account_snapshot_at_start = _snapshot_account(account, buying_power=buying_power)
 
     forced_exit_recs = _forced_exit_recommendations(current_positions)
     forced_exit_symbols = {str(x.get("symbol", "")).upper() for x in forced_exit_recs}
@@ -125,6 +173,13 @@ def main():
     
     if len(top_movers) == 0 and not forced_exit_recs:
         print("🤷 No candidates met liquidity requirements and no forced exits. Ending run.")
+        _write_profit_summary(
+            trading_client=trading_client,
+            fallback_account_snapshot=account_snapshot_at_start,
+            fallback_positions_snapshot=current_positions,
+            trades_executed=0,
+            run_status="no_candidates",
+        )
         return
 
     # ---------------------------------------------------------
@@ -235,6 +290,13 @@ def main():
         if forced_exit_recs:
             final_recommendations = list(forced_exit_recs)
         else:
+            _write_profit_summary(
+                trading_client=trading_client,
+                fallback_account_snapshot=account_snapshot_at_start,
+                fallback_positions_snapshot=current_positions,
+                trades_executed=0,
+                run_status="no_prescored_candidates",
+            )
             return
     else:
         shortlisted = [
@@ -387,6 +449,13 @@ def main():
                 )
                 
     print(f"\n✅ Pipeline Complete. Executed {trades_executed} trades today.")
+    _write_profit_summary(
+        trading_client=trading_client,
+        fallback_account_snapshot=account_snapshot_at_start,
+        fallback_positions_snapshot=current_positions,
+        trades_executed=trades_executed,
+        run_status="completed",
+    )
 
 if __name__ == "__main__":
     main()

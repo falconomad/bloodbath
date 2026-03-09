@@ -8,6 +8,16 @@ def _bool_env(name: str, default: bool) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
 # API Keys
 ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
 ALPACA_API_SECRET = os.environ.get('ALPACA_API_SECRET')
@@ -48,4 +58,6 @@ GEMINI_MIN_SECONDS_BETWEEN_CALLS = int(os.environ.get("GEMINI_MIN_SECONDS_BETWEE
 GEMINI_MAX_RETRIES_ON_429 = int(os.environ.get("GEMINI_MAX_RETRIES_ON_429", 1))
 GEMINI_QUOTA_STATE_PATH = os.environ.get("GEMINI_QUOTA_STATE_PATH", "logs/gemini_quota_state.json")
 ENGINE_EVENTS_PATH = os.environ.get("ENGINE_EVENTS_PATH", "logs/engine_events.jsonl")
+PROFIT_SUMMARY_PATH = os.environ.get("PROFIT_SUMMARY_PATH", "logs/profit_summary.json")
+BASELINE_EQUITY = _float_env("BASELINE_EQUITY", 0.0)
 MACRO_DOWNTURN_LIMIT = -2.0 # Halt buying if SPY is down > 2%

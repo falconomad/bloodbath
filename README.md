@@ -36,6 +36,8 @@ Gemini optimization knobs:
 - `GEMINI_MODEL` (default `gemini-2.5-flash`)
 - `GEMINI_QUOTA_STATE_PATH` (default `logs/gemini_quota_state.json`)
 - `ENGINE_EVENTS_PATH` (default `logs/engine_events.jsonl`)
+- `PROFIT_SUMMARY_PATH` (default `logs/profit_summary.json`)
+- `BASELINE_EQUITY` (default `0`; set to your starting capital to get stable total-profit tracking)
 
 Notes:
 - Engine uses deterministic fallbacks if Gemini returns `429 RESOURCE_EXHAUSTED`.
@@ -46,6 +48,7 @@ Notes:
 - Earnings context uses free yfinance calendar when available.
 - Macro/geopolitical context is sourced from free Google News RSS.
 - Deterministic forced exits run independently of Gemini so risk exits can still execute under quota exhaustion.
+- Profit summary JSON is refreshed every bot run and printed in logs.
 
 Fresh Start (Reset State + Set Capital):
 
