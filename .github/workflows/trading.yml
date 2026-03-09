@@ -31,4 +31,7 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MINUTE_STEP: "20"
+          GEMINI_MAX_RETRIES_ON_429: "0"
+          ONLY_WHEN_MARKET_OPEN: "true"
         run: python main.py
