@@ -47,8 +47,7 @@ def get_top_movers(limit=15):
             movers.append({
                 "symbol": mover.symbol,
                 "price": float(mover.price),
-                "change_pct": float(mover.percent_change),
-                "volume": int(mover.volume)
+                "change_pct": float(mover.percent_change)
             })
             
         return movers
