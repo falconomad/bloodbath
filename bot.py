@@ -6,10 +6,9 @@ from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest, StockSnapshotRequest
-from alpaca.data.screener.screener import ScreenerClient
-from alpaca.data.screener.requests import ScreenerRequest
-from alpaca.data.screener.filter import ScreenerFilter, ScreenerFilterCondition
-import alpaca.data.screener.filter as filters
+from alpaca.data.historical.screener import ScreenerClient
+from alpaca.data.requests import MarketMoversRequest
+from alpaca.data.models.screener import MarketType
 from datetime import datetime, timedelta, timezone
 
 # API Keys
@@ -36,17 +35,15 @@ def get_top_movers(limit=15):
         # However, Alpaca's Screener client provides `get_top_movers` endpoints.
         # Let's utilize the native Top Movers screener:
         
-        req = ScreenerRequest(
-            sort_by=filters.MoversSort.PERCENT_CHANGE,
-            direction=filters.SortDirection.DESC,
-            limit=limit,
-            type=filters.MoversType.GAINERS
+        req = MarketMoversRequest(
+            top=limit,
+            market_type=MarketType.STOCKS
         )
         
-        response = screener_client.get_top_movers(req)
+        response = screener_client.get_market_movers(req)
         
         movers = []
-        for mover in response.movers:
+        for mover in response.gainers:
             movers.append({
                 "symbol": mover.symbol,
                 "price": float(mover.price),
