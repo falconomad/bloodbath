@@ -2,7 +2,10 @@ from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest
 from datetime import datetime, timedelta, timezone
 import logging
-import yfinance as yf
+try:
+    import yfinance as yf
+except Exception:  # pragma: no cover
+    yf = None
 
 import config
 
@@ -34,7 +37,9 @@ def get_news_context(symbols, limit_per_symbol=3):
                      })
     except Exception as e:
         logging.error(f"[NewsFeed] Error fetching news: {e}", exc_info=True)
-    # Fallback/fill via yfinance news per symbol.
+    # Fallback/fill via yfinance news per symbol when available.
+    if yf is None:
+        return news_by_symbol
     now = datetime.now(timezone.utc)
     min_time = now - timedelta(days=3)
     for sym in symbols:

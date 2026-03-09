@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 
 import requests
-import yfinance as yf
+try:
+    import yfinance as yf
+except Exception:  # pragma: no cover
+    yf = None
 
 def get_macro_calendar():
     """Free macro/geopolitical pulse from Google News RSS."""
@@ -48,6 +51,14 @@ def get_earnings_calendar(symbols):
     """Free earnings context using yfinance calendar when available."""
     out = {}
     now = datetime.now(timezone.utc)
+    if yf is None:
+        for sym in symbols:
+            out[str(sym).upper()] = {
+                "status": "unavailable",
+                "days_to_earnings": None,
+                "earnings_upcoming_7d": False,
+            }
+        return out
     for sym in symbols:
         sym_u = str(sym).upper()
         default = {

@@ -1,2 +1,4 @@
 alpaca-py
 google-genai
+yfinance
+requests
