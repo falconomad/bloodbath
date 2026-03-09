@@ -160,3 +160,96 @@ def make_final_decision(symbol, current_positions, buying_power, technical_repor
             sentiment_report=sentiment_report,
             reason=f"Executive engine failed: {e}",
         )
+
+
+def make_batch_decisions(candidates, current_positions, buying_power):
+    """
+    candidates: list[{
+      "symbol": str,
+      "technical_report": {...},
+      "sentiment_report": {...}
+    }]
+    Returns dict[symbol] -> decision payload.
+    """
+    if not candidates:
+        return {}
+
+    slim_candidates = []
+    for c in candidates:
+        symbol = str(c.get("symbol", "")).upper().strip()
+        if not symbol:
+            continue
+        tech = c.get("technical_report", {}) or {}
+        sent = c.get("sentiment_report", {}) or {}
+        # Compact payload to reduce token usage.
+        slim_candidates.append(
+            {
+                "symbol": symbol,
+                "tech_score": int(tech.get("score", 0) or 0),
+                "tech_rationale": str(tech.get("rationale", ""))[:180],
+                "sent_score": int(sent.get("score", 50) or 50),
+                "sent_rationale": str(sent.get("rationale", ""))[:180],
+            }
+        )
+
+    prompt = f"""
+    You are the Chief Investment Officer (CIO) of an aggressive algorithmic day-trading fund.
+    Goal: increase portfolio value today, never hold overnight.
+
+    Current Buying Power: ${buying_power}
+    Open Positions: {json.dumps(current_positions)}
+    Candidate Reports: {json.dumps(slim_candidates)}
+
+    Rules for ABSOLUTE COMPLIANCE:
+    1. STRICT EXITS (Profits): If a candidate is currently held and unrealized_pl_pct > {config.PROFIT_TAKE_PCT}%, action MUST be "sell" with allocation_pct 100.
+    2. STRICT EXITS (Losses): If a candidate is currently held and unrealized_pl_pct < {config.STOP_LOSS_PCT}%, action MUST be "sell" with allocation_pct 100.
+    3. NEW ENTRIES: Only "buy" when BOTH tech_score > 70 and sent_score > 70.
+    4. POSITION SIZING: allocation_pct is raw conviction 0-100; risk manager will cap at {config.MAX_ALLOCATION_PCT}%.
+
+    Output JSON ONLY with this exact schema:
+    {{
+      "decisions": [
+        {{
+          "symbol": "TICKER",
+          "action": "buy" | "sell" | "hold",
+          "allocation_pct": <integer 0-100>,
+          "chain_of_thought": "single brief sentence"
+        }}
+      ]
+    }}
+    """
+
+    try:
+        response = _rate_limited_generate(prompt)
+        text = response.text.replace("```json", "").replace("```", "").strip()
+        payload = json.loads(text)
+        decisions = payload.get("decisions", []) if isinstance(payload, dict) else []
+        out = {}
+        for row in decisions:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("symbol", "")).upper().strip()
+            if not symbol:
+                continue
+            out[symbol] = {
+                "symbol": symbol,
+                "action": str(row.get("action", "hold")).lower(),
+                "allocation_pct": int(max(0, min(100, int(row.get("allocation_pct", 0) or 0)))),
+                "chain_of_thought": str(row.get("chain_of_thought", ""))[:600],
+            }
+        return out
+    except Exception as e:
+        logging.error("[ExecutiveBoard] Batch decision failed: %s", e, exc_info=True)
+        out = {}
+        for c in candidates:
+            symbol = str(c.get("symbol", "")).upper().strip()
+            if not symbol:
+                continue
+            out[symbol] = _deterministic_fallback(
+                symbol=symbol,
+                current_positions=current_positions,
+                technical_report=c.get("technical_report", {}) or {},
+                sentiment_report=c.get("sentiment_report", {}) or {},
+                reason=f"Batch executive failed: {e}",
+            )
+        return out

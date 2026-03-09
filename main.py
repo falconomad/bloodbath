@@ -157,23 +157,33 @@ def main():
         f"Sending top {len(selected_for_gemini)} to Gemini (budget={gemini_budget}/run)."
     )
 
+    print("   👑 Running Executive Board Synthesis (single Gemini batch call)...")
+    batch_payload = [
+        {
+            "symbol": item["mover"]["symbol"],
+            "technical_report": item["tech_report"],
+            "sentiment_report": item["sent_report"],
+        }
+        for item in selected_for_gemini
+    ]
+    batch_decisions = executive_board.make_batch_decisions(
+        candidates=batch_payload,
+        current_positions=current_positions,
+        buying_power=buying_power,
+    )
+
     final_recommendations = []
-    for idx, item in enumerate(selected_for_gemini):
-        mover = item["mover"]
-        symbol = mover["symbol"]
-        tech_report = item["tech_report"]
-        sent_report = item["sent_report"]
-
-        print("   👑 Running Executive Board Synthesis...")
-        exec_decision = executive_board.make_final_decision(symbol, current_positions, buying_power, tech_report, sent_report)
-        print(f"      -> Action: {exec_decision.get('action', 'HOLD').upper()} | Alloc: {exec_decision.get('allocation_pct', 0)}%")
-        print(f"      -> Reasoning: {exec_decision.get('chain_of_thought', '')}")
-
+    for item in selected_for_gemini:
+        symbol = item["mover"]["symbol"]
+        exec_decision = batch_decisions.get(symbol) or {
+            "symbol": symbol,
+            "action": "hold",
+            "allocation_pct": 0,
+            "chain_of_thought": "No executive decision returned for symbol.",
+        }
+        print(f"   {symbol} -> Action: {exec_decision.get('action', 'HOLD').upper()} | Alloc: {exec_decision.get('allocation_pct', 0)}%")
+        print(f"      Reasoning: {exec_decision.get('chain_of_thought', '')}")
         final_recommendations.append(exec_decision)
-
-        if idx < len(selected_for_gemini) - 1:
-            print(f"   ⏱️ Sleeping {config.API_SLEEP_SECONDS}s to respect Gemini API rate limits...")
-            time.sleep(config.API_SLEEP_SECONDS)
 
     # ---------------------------------------------------------
     # 5. RISK MANAGEMENT & EXECUTION
