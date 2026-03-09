@@ -1,5 +1,13 @@
 import os
 
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 # API Keys
 ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
 ALPACA_API_SECRET = os.environ.get('ALPACA_API_SECRET')
@@ -30,6 +38,8 @@ PRE_FILTER_MIN_CONFIDENCE = float(os.environ.get("PRE_FILTER_MIN_CONFIDENCE", 0.
 RELAXED_SENTIMENT_DELTA = int(os.environ.get("RELAXED_SENTIMENT_DELTA", 10))
 RELAXED_CONFIDENCE_DELTA = float(os.environ.get("RELAXED_CONFIDENCE_DELTA", 0.08))
 MAX_RELAXED_CANDIDATES = int(os.environ.get("MAX_RELAXED_CANDIDATES", 1))
+GEMINI_MINUTE_STEP = int(os.environ.get("GEMINI_MINUTE_STEP", 30))
+ONLY_WHEN_MARKET_OPEN = _bool_env("ONLY_WHEN_MARKET_OPEN", True)
 
 # Free Tier Rate Limits (Gemini Flash allows 15 Requests Per Minute)
 # We make 3 calls per ticker, so we need to spread them out.

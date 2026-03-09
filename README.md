@@ -28,6 +28,8 @@ Gemini optimization knobs:
 - `RELAXED_SENTIMENT_DELTA` (default `10`)
 - `RELAXED_CONFIDENCE_DELTA` (default `0.08`)
 - `MAX_RELAXED_CANDIDATES` (default `1`)
+- `GEMINI_MINUTE_STEP` (default `30`, call Gemini only when current UTC minute is a multiple of step)
+- `ONLY_WHEN_MARKET_OPEN` (default `true`, skip new-entry scans when market is closed)
 - `API_SLEEP_SECONDS` (default `15`)
 - `GEMINI_MIN_SECONDS_BETWEEN_CALLS` (default `15`)
 - `GEMINI_MAX_RETRIES_ON_429` (default `1`)
@@ -43,6 +45,7 @@ Notes:
 - News context now uses Alpaca first with yfinance fallback.
 - Earnings context uses free yfinance calendar when available.
 - Macro/geopolitical context is sourced from free Google News RSS.
+- Deterministic forced exits run independently of Gemini so risk exits can still execute under quota exhaustion.
 
 Fresh Start (Reset State + Set Capital):
 
