@@ -37,6 +37,9 @@ Notes:
 - Risk manager still enforces allocation caps and macro crash protection before execution.
 - Candidate selection is now regime-aware and confidence-aware before Gemini.
 - Full run telemetry is emitted as JSONL for tuning and post-trade analysis.
+- News context now uses Alpaca first with yfinance fallback.
+- Earnings context uses free yfinance calendar when available.
+- Macro/geopolitical context is sourced from free Google News RSS.
 
 Fresh Start (Reset State + Set Capital):
 

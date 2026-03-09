@@ -58,6 +58,8 @@ def build_features(symbol: str, bars: list[dict[str, Any]], spy_history: list[di
 
     news_count = len(news_items or [])
     news_density = _clamp(news_count / 3.0, 0.0, 1.0)
+    source_diversity = len({str(x.get("source", "")).lower() for x in (news_items or []) if str(x.get("source", "")).strip()})
+    source_diversity = _clamp(source_diversity / 3.0, 0.0, 1.0)
 
     return {
         "symbol": symbol,
@@ -70,6 +72,7 @@ def build_features(symbol: str, bars: list[dict[str, Any]], spy_history: list[di
         "rel_strength_5d": rel_strength_5d,
         "news_count": news_count,
         "news_density": news_density,
+        "source_diversity": source_diversity,
         "last_close": closes[-1],
     }
 
@@ -96,7 +99,7 @@ def rank_candidate(features: dict[str, float], tech_score: int, sent_score: int,
     rel = _clamp(rel, 0, 100)
 
     liquidity = _clamp((features["vol_mult"] * 35.0) + (features["vol_stability"] * 65.0), 0, 100)
-    context = _clamp((features["news_density"] * 100.0), 0, 100)
+    context = _clamp(((0.75 * features["news_density"]) + (0.25 * features.get("source_diversity", 0.0))) * 100.0, 0, 100)
 
     regime_bias = 0.0
     if regime == "risk_on":
@@ -117,7 +120,14 @@ def rank_candidate(features: dict[str, float], tech_score: int, sent_score: int,
 
     # Confidence penalizes disagreement and weak context.
     disagreement = abs(float(tech_score) - float(sent_score)) / 100.0
-    confidence = 0.45 + (0.30 * (min(tech_score, sent_score) / 100.0)) + (0.20 * features["vol_stability"]) + (0.15 * features["news_density"]) - (0.25 * disagreement)
+    confidence = (
+        0.43
+        + (0.28 * (min(tech_score, sent_score) / 100.0))
+        + (0.18 * features["vol_stability"])
+        + (0.13 * features["news_density"])
+        + (0.08 * features.get("source_diversity", 0.0))
+        - (0.25 * disagreement)
+    )
     if regime == "risk_off":
         confidence -= 0.08
     confidence = _clamp(confidence, 0.0, 1.0)

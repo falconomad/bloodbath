@@ -1,4 +1,3 @@
-import json
 import time
 import config
 from data_ingestion import market_data, news_feed, calendar_events
@@ -125,6 +124,7 @@ def main():
         sent_report = sentiment_analyst.evaluate_sentiment(symbol, sym_news, sym_events, macro_calendar)
         tech_score = int(tech_report.get("score", 0) or 0)
         sent_score = int(sent_report.get("score", 0) or 0)
+        sent_conf = float(sent_report.get("confidence", 0.5) or 0.5)
         features = candidate_ranker.build_features(symbol, sym_history, spy_context, sym_news)
         if not features:
             print("      -> rejected: failed to build local features")
@@ -133,7 +133,8 @@ def main():
         rank = candidate_ranker.rank_candidate(features, tech_score, sent_score, regime)
         print(
             f"      -> Technical: {tech_score}/100 | Sentiment: {sent_score}/100 | "
-            f"LocalScore: {rank['local_score']:.1f} | Confidence: {100.0 * rank['confidence']:.1f}%"
+            f"SentConf: {100.0 * sent_conf:.1f}% | LocalScore: {rank['local_score']:.1f} | "
+            f"Confidence: {100.0 * rank['confidence']:.1f}%"
         )
         if reject_reasons:
             print(f"      -> hard reject: {', '.join(reject_reasons)}")
@@ -147,10 +148,13 @@ def main():
                 "sent_score": sent_score,
                 "local_score": rank["local_score"],
                 "confidence": rank["confidence"],
+                "sent_confidence": sent_conf,
                 "reject_reasons": reject_reasons,
                 "features": features,
                 "mover_price": mover.get("price"),
                 "mover_change_pct": mover.get("change_pct"),
+                "earnings_context": sym_events,
+                "macro_context": macro_calendar,
             },
             path=config.ENGINE_EVENTS_PATH,
         )
@@ -239,6 +243,7 @@ def main():
                 "confidence": item["rank"]["confidence"],
                 "tech_score": item["tech_report"].get("score", 0),
                 "sent_score": item["sent_report"].get("score", 0),
+                "sent_confidence": item["sent_report"].get("confidence", 0.5),
             },
             path=config.ENGINE_EVENTS_PATH,
         )
