@@ -182,12 +182,39 @@ def main():
         and float(item["rank"]["confidence"]) >= float(config.PRE_FILTER_MIN_CONFIDENCE)
     ]
     if not shortlisted:
+        relaxed_sent = max(0, int(config.PRE_FILTER_MIN_SENTIMENT_SCORE) - int(config.RELAXED_SENTIMENT_DELTA))
+        relaxed_conf = max(0.30, float(config.PRE_FILTER_MIN_CONFIDENCE) - float(config.RELAXED_CONFIDENCE_DELTA))
+        relaxed = [
+            item for item in pre_scored
+            if not item["reject_reasons"]
+            and int(item["tech_report"].get("score", 0)) >= config.PRE_FILTER_MIN_TECH_SCORE
+            and int(item["sent_report"].get("score", 0)) >= relaxed_sent
+            and float(item["rank"]["local_score"]) >= float(config.PRE_FILTER_MIN_LOCAL_SCORE)
+            and float(item["rank"]["confidence"]) >= float(relaxed_conf)
+        ]
+        if not relaxed:
+            print(
+                f"\n[PreFilter] No symbols met thresholds "
+                f"(tech>={config.PRE_FILTER_MIN_TECH_SCORE}, sentiment>={config.PRE_FILTER_MIN_SENTIMENT_SCORE}, "
+                f"local_score>={config.PRE_FILTER_MIN_LOCAL_SCORE}, conf>={config.PRE_FILTER_MIN_CONFIDENCE:.2f})."
+            )
+            return
+        relaxed.sort(key=lambda x: (x["rank"]["local_score"], x["rank"]["confidence"]), reverse=True)
+        shortlisted = relaxed[: max(int(config.MAX_RELAXED_CANDIDATES), 1)]
         print(
-            f"\n[PreFilter] No symbols met thresholds "
-            f"(tech>={config.PRE_FILTER_MIN_TECH_SCORE}, sentiment>={config.PRE_FILTER_MIN_SENTIMENT_SCORE}, "
-            f"local_score>={config.PRE_FILTER_MIN_LOCAL_SCORE}, conf>={config.PRE_FILTER_MIN_CONFIDENCE:.2f})."
+            f"\n[PreFilter] Strict gates found 0 candidates. "
+            f"Relaxed fallback selected {len(shortlisted)} symbol(s) "
+            f"(sentiment>={relaxed_sent}, conf>={relaxed_conf:.2f})."
         )
-        return
+        telemetry.log_event(
+            "shortlist_relaxed_fallback",
+            {
+                "relaxed_sentiment_threshold": relaxed_sent,
+                "relaxed_confidence_threshold": round(float(relaxed_conf), 4),
+                "selected_symbols": [item["mover"]["symbol"] for item in shortlisted],
+            },
+            path=config.ENGINE_EVENTS_PATH,
+        )
 
     shortlisted.sort(key=lambda x: (x["rank"]["local_score"], x["rank"]["confidence"]), reverse=True)
     gemini_budget = max(int(config.MAX_GEMINI_CALLS_PER_RUN), 1)

@@ -27,6 +27,9 @@ PRE_FILTER_MIN_TECH_SCORE = int(os.environ.get("PRE_FILTER_MIN_TECH_SCORE", 55))
 PRE_FILTER_MIN_SENTIMENT_SCORE = int(os.environ.get("PRE_FILTER_MIN_SENTIMENT_SCORE", 45))
 PRE_FILTER_MIN_LOCAL_SCORE = int(os.environ.get("PRE_FILTER_MIN_LOCAL_SCORE", 60))
 PRE_FILTER_MIN_CONFIDENCE = float(os.environ.get("PRE_FILTER_MIN_CONFIDENCE", 0.55))
+RELAXED_SENTIMENT_DELTA = int(os.environ.get("RELAXED_SENTIMENT_DELTA", 10))
+RELAXED_CONFIDENCE_DELTA = float(os.environ.get("RELAXED_CONFIDENCE_DELTA", 0.08))
+MAX_RELAXED_CANDIDATES = int(os.environ.get("MAX_RELAXED_CANDIDATES", 1))
 
 # Free Tier Rate Limits (Gemini Flash allows 15 Requests Per Minute)
 # We make 3 calls per ticker, so we need to spread them out.
