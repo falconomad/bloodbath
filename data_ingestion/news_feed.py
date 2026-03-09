@@ -1,5 +1,6 @@
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest
+import logging
 
 import config
 
@@ -29,5 +30,5 @@ def get_news_context(symbols, limit_per_symbol=3):
                      })
         return news_by_symbol
     except Exception as e:
-        print(f"[NewsFeed] Error fetching news: {e}")
+        logging.error(f"[NewsFeed] Error fetching news: {e}", exc_info=True)
         return {}

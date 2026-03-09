@@ -1,4 +1,5 @@
 import json
+import logging
 from google import genai
 import config
 
@@ -35,5 +36,5 @@ def evaluate_technicals(symbol, history, spy_context):
         text = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(text)
     except Exception as e:
-        print(f"[TechnicalAnalyst] Error grading {symbol}: {e}")
+        logging.error(f"[TechnicalAnalyst] Error grading {symbol}: {e}", exc_info=True)
         return {"score": 0, "rationale": "Failed to analyze technicals."}

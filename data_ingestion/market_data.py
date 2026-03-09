@@ -5,6 +5,7 @@ from alpaca.data.historical.screener import ScreenerClient
 from alpaca.data.requests import MarketMoversRequest
 from alpaca.data.models.screener import MarketType
 from datetime import datetime, timedelta, timezone
+import logging
 
 import config
 
@@ -30,7 +31,7 @@ def get_top_movers(limit=15):
             
         return movers
     except Exception as e:
-        print(f"[MarketData] Error fetching top movers via Screener API: {e}")
+        logging.error(f"[MarketData] Error fetching top movers via Screener API: {e}", exc_info=True)
         return []
 
 def get_history_context(symbols, days_back=5):
@@ -51,5 +52,5 @@ def get_history_context(symbols, days_back=5):
             history[symbol] = [{"c": float(b.close), "t": b.timestamp.isoformat()} for b in bars]
         return history
     except Exception as e:
-        print(f"[MarketData] Error fetching history data: {e}")
+        logging.error(f"[MarketData] Error fetching history data: {e}", exc_info=True)
         return {}

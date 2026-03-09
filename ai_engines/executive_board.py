@@ -1,4 +1,5 @@
 import json
+import logging
 from google import genai
 import config
 
@@ -45,5 +46,5 @@ def make_final_decision(symbol, current_positions, buying_power, technical_repor
         data['symbol'] = symbol
         return data
     except Exception as e:
-        print(f"[ExecutiveBoard] Error synthesizing decision for {symbol}: {e}")
+        logging.error(f"[ExecutiveBoard] Error synthesizing decision for {symbol}: {e}", exc_info=True)
         return {"symbol": symbol, "action": "hold", "allocation_pct": 0, "chain_of_thought": "Executive engine failed."}

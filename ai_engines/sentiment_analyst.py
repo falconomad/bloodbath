@@ -1,4 +1,5 @@
 import json
+import logging
 from google import genai
 import config
 
@@ -37,5 +38,5 @@ def evaluate_sentiment(symbol, news, upcoming_events, macro_calendar):
         text = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(text)
     except Exception as e:
-        print(f"[SentimentAnalyst] Error grading {symbol}: {e}")
+        logging.error(f"[SentimentAnalyst] Error grading {symbol}: {e}", exc_info=True)
         return {"score": 50, "rationale": "Failed to analyze sentiment (Defaulting neutral)."}
