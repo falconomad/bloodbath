@@ -49,7 +49,7 @@ def get_history_context(symbols, days_back=5):
         
         history = {}
         for symbol, bars in res.data.items():
-            history[symbol] = [{"c": float(b.close), "t": b.timestamp.isoformat()} for b in bars]
+            history[symbol] = [{"c": float(b.close), "v": float(b.volume), "t": b.timestamp.isoformat()} for b in bars]
         return history
     except Exception as e:
         logging.error(f"[MarketData] Error fetching history data: {e}", exc_info=True)

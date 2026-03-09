@@ -52,6 +52,30 @@ def main():
     history = market_data.get_history_context(symbols_to_fetch)
     spy_context = history.pop("SPY", [])
     
+    print("\n[Filter] Vetting candidates by liquidity and price...")
+    candidates = []
+    for mover in top_movers:
+        sym = mover["symbol"]
+        bars = history.get(sym, [])
+        if not bars:
+            continue
+            
+        # Average volume over last 5 days
+        avg_vol = sum(b['v'] for b in bars) / len(bars)
+        dollar_vol = avg_vol * mover["price"]
+        
+        if mover["price"] >= config.MIN_PRICE and dollar_vol >= config.MIN_DOLLAR_VOLUME:
+            candidates.append((dollar_vol, mover))
+            
+    # Sort by highest dollar volume to prioritize the most liquid market movers
+    candidates.sort(reverse=True, key=lambda x: x[0])
+    top_movers = [c[1] for c in candidates[:config.MAX_CANDIDATES]]
+    print(f"🎯 Filtered down to {len(top_movers)} absolute best candidates based on ${config.MIN_PRICE}+ price and ${config.MIN_DOLLAR_VOLUME:,.0f}+ 5-day volume.")
+    
+    if len(top_movers) == 0:
+        print("🤷 No candidates met the strict liquidity requirements today. Sleeping until next run.")
+        return
+    
     # ---------------------------------------------------------
     # 3. FETCH NEWS & SENTIMENT CONTEXT
     # ---------------------------------------------------------
