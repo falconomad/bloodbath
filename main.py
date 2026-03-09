@@ -2,8 +2,8 @@ import json
 import time
 import config
 from data_ingestion import market_data, news_feed, calendar_events
-from ai_engines import technical_analyst, sentiment_analyst, executive_board
-from execution import risk_manager, trade_executor
+from ai_engines import candidate_ranker, executive_board, sentiment_analyst, technical_analyst
+from execution import risk_manager, telemetry, trade_executor
 from alpaca.trading.client import TradingClient
 
 def main():
@@ -51,6 +51,8 @@ def main():
     print(f"📈 Fetching 5-day historical technical data for {len(symbols_to_fetch)} symbols...")
     history = market_data.get_history_context(symbols_to_fetch)
     spy_context = history.pop("SPY", [])
+    regime = candidate_ranker.detect_market_regime(spy_context)
+    print(f"🧭 Detected market regime: {regime}")
     
     print("\n[Filter] Vetting candidates by liquidity and price...")
     candidates = []
@@ -93,7 +95,8 @@ def main():
         "account": {"buying_power": buying_power},
         "open_positions": current_positions,
         "broad_market_spy": spy_context,
-        "todays_top_movers": top_movers
+        "todays_top_movers": top_movers,
+        "market_regime": regime,
     }
 
     # ---------------------------------------------------------
@@ -103,7 +106,7 @@ def main():
     print("🧠 ENGAGING AI COUNCIL FOR INDIVIDUAL ASSETS 🧠")
     print("="*50)
 
-    # Phase A: local deterministic pre-scoring for all candidates (0 Gemini calls).
+    # Phase A: local deterministic feature extraction and ranking (0 Gemini calls).
     pre_scored = []
     for mover in top_movers:
         symbol = mover["symbol"]
@@ -122,14 +125,43 @@ def main():
         sent_report = sentiment_analyst.evaluate_sentiment(symbol, sym_news, sym_events, macro_calendar)
         tech_score = int(tech_report.get("score", 0) or 0)
         sent_score = int(sent_report.get("score", 0) or 0)
-        blend = (0.65 * tech_score) + (0.35 * sent_score)
-        print(f"      -> Technical: {tech_score}/100 | Sentiment: {sent_score}/100 | Blend: {blend:.1f}")
+        features = candidate_ranker.build_features(symbol, sym_history, spy_context, sym_news)
+        if not features:
+            print("      -> rejected: failed to build local features")
+            continue
+        reject_reasons = candidate_ranker.hard_reject_reasons(features, regime)
+        rank = candidate_ranker.rank_candidate(features, tech_score, sent_score, regime)
+        print(
+            f"      -> Technical: {tech_score}/100 | Sentiment: {sent_score}/100 | "
+            f"LocalScore: {rank['local_score']:.1f} | Confidence: {100.0 * rank['confidence']:.1f}%"
+        )
+        if reject_reasons:
+            print(f"      -> hard reject: {', '.join(reject_reasons)}")
+
+        telemetry.log_event(
+            "candidate_scored",
+            {
+                "symbol": symbol,
+                "regime": regime,
+                "tech_score": tech_score,
+                "sent_score": sent_score,
+                "local_score": rank["local_score"],
+                "confidence": rank["confidence"],
+                "reject_reasons": reject_reasons,
+                "features": features,
+                "mover_price": mover.get("price"),
+                "mover_change_pct": mover.get("change_pct"),
+            },
+            path=config.ENGINE_EVENTS_PATH,
+        )
         pre_scored.append(
             {
                 "mover": mover,
                 "tech_report": tech_report,
                 "sent_report": sent_report,
-                "blend": blend,
+                "features": features,
+                "rank": rank,
+                "reject_reasons": reject_reasons,
             }
         )
 
@@ -139,22 +171,36 @@ def main():
 
     shortlisted = [
         item for item in pre_scored
-        if int(item["tech_report"].get("score", 0)) >= config.PRE_FILTER_MIN_TECH_SCORE
+        if not item["reject_reasons"]
+        and int(item["tech_report"].get("score", 0)) >= config.PRE_FILTER_MIN_TECH_SCORE
         and int(item["sent_report"].get("score", 0)) >= config.PRE_FILTER_MIN_SENTIMENT_SCORE
+        and float(item["rank"]["local_score"]) >= float(config.PRE_FILTER_MIN_LOCAL_SCORE)
+        and float(item["rank"]["confidence"]) >= float(config.PRE_FILTER_MIN_CONFIDENCE)
     ]
     if not shortlisted:
         print(
             f"\n[PreFilter] No symbols met thresholds "
-            f"(tech>={config.PRE_FILTER_MIN_TECH_SCORE}, sentiment>={config.PRE_FILTER_MIN_SENTIMENT_SCORE})."
+            f"(tech>={config.PRE_FILTER_MIN_TECH_SCORE}, sentiment>={config.PRE_FILTER_MIN_SENTIMENT_SCORE}, "
+            f"local_score>={config.PRE_FILTER_MIN_LOCAL_SCORE}, conf>={config.PRE_FILTER_MIN_CONFIDENCE:.2f})."
         )
         return
 
-    shortlisted.sort(key=lambda x: x["blend"], reverse=True)
+    shortlisted.sort(key=lambda x: (x["rank"]["local_score"], x["rank"]["confidence"]), reverse=True)
     gemini_budget = max(int(config.MAX_GEMINI_CALLS_PER_RUN), 1)
     selected_for_gemini = shortlisted[:gemini_budget]
     print(
         f"\n[PreFilter] {len(shortlisted)} passed local thresholds. "
         f"Sending top {len(selected_for_gemini)} to Gemini (budget={gemini_budget}/run)."
+    )
+    telemetry.log_event(
+        "shortlist_selected",
+        {
+            "regime": regime,
+            "selected_symbols": [item["mover"]["symbol"] for item in selected_for_gemini],
+            "total_passed": len(shortlisted),
+            "gemini_budget": gemini_budget,
+        },
+        path=config.ENGINE_EVENTS_PATH,
     )
 
     print("   👑 Running Executive Board Synthesis (single Gemini batch call)...")
@@ -184,6 +230,18 @@ def main():
         print(f"   {symbol} -> Action: {exec_decision.get('action', 'HOLD').upper()} | Alloc: {exec_decision.get('allocation_pct', 0)}%")
         print(f"      Reasoning: {exec_decision.get('chain_of_thought', '')}")
         final_recommendations.append(exec_decision)
+        telemetry.log_event(
+            "gemini_decision",
+            {
+                "symbol": symbol,
+                "decision": exec_decision,
+                "local_score": item["rank"]["local_score"],
+                "confidence": item["rank"]["confidence"],
+                "tech_score": item["tech_report"].get("score", 0),
+                "sent_score": item["sent_report"].get("score", 0),
+            },
+            path=config.ENGINE_EVENTS_PATH,
+        )
 
     # ---------------------------------------------------------
     # 5. RISK MANAGEMENT & EXECUTION
@@ -195,10 +253,31 @@ def main():
     trades_executed = 0
     for rec in final_recommendations:
         validated_trade = risk_manager.validate_and_size_trade(rec, market_state)
+        telemetry.log_event(
+            "risk_validation",
+            {
+                "symbol": rec.get("symbol"),
+                "action": rec.get("action"),
+                "allocation_pct": rec.get("allocation_pct"),
+                "validated": bool(validated_trade),
+                "validated_trade": validated_trade,
+            },
+            path=config.ENGINE_EVENTS_PATH,
+        )
         if validated_trade:
             order = trade_executor.execute_order(validated_trade)
             if order:
                 trades_executed += 1
+                telemetry.log_event(
+                    "order_executed",
+                    {
+                        "symbol": validated_trade.get("symbol"),
+                        "action": validated_trade.get("action"),
+                        "qty": validated_trade.get("qty"),
+                        "capped_alloc_pct": validated_trade.get("capped_alloc_pct"),
+                    },
+                    path=config.ENGINE_EVENTS_PATH,
+                )
                 
     print(f"\n✅ Pipeline Complete. Executed {trades_executed} trades today.")
 

@@ -23,15 +23,20 @@ Gemini optimization knobs:
 - `MAX_GEMINI_CALLS_PER_RUN` (default `3`)
 - `PRE_FILTER_MIN_TECH_SCORE` (default `55`)
 - `PRE_FILTER_MIN_SENTIMENT_SCORE` (default `45`)
+- `PRE_FILTER_MIN_LOCAL_SCORE` (default `60`)
+- `PRE_FILTER_MIN_CONFIDENCE` (default `0.55`)
 - `API_SLEEP_SECONDS` (default `15`)
 - `GEMINI_MIN_SECONDS_BETWEEN_CALLS` (default `15`)
 - `GEMINI_MAX_RETRIES_ON_429` (default `1`)
 - `GEMINI_MODEL` (default `gemini-2.5-flash`)
 - `GEMINI_QUOTA_STATE_PATH` (default `logs/gemini_quota_state.json`)
+- `ENGINE_EVENTS_PATH` (default `logs/engine_events.jsonl`)
 
 Notes:
 - Engine uses deterministic fallbacks if Gemini returns `429 RESOURCE_EXHAUSTED`.
 - Risk manager still enforces allocation caps and macro crash protection before execution.
+- Candidate selection is now regime-aware and confidence-aware before Gemini.
+- Full run telemetry is emitted as JSONL for tuning and post-trade analysis.
 
 Fresh Start (Reset State + Set Capital):
 

@@ -25,6 +25,8 @@ MAX_CANDIDATES = 5 # Send max 5 stocks strictly to the AI council to preserve qu
 MAX_GEMINI_CALLS_PER_RUN = int(os.environ.get("MAX_GEMINI_CALLS_PER_RUN", 3))
 PRE_FILTER_MIN_TECH_SCORE = int(os.environ.get("PRE_FILTER_MIN_TECH_SCORE", 55))
 PRE_FILTER_MIN_SENTIMENT_SCORE = int(os.environ.get("PRE_FILTER_MIN_SENTIMENT_SCORE", 45))
+PRE_FILTER_MIN_LOCAL_SCORE = int(os.environ.get("PRE_FILTER_MIN_LOCAL_SCORE", 60))
+PRE_FILTER_MIN_CONFIDENCE = float(os.environ.get("PRE_FILTER_MIN_CONFIDENCE", 0.55))
 
 # Free Tier Rate Limits (Gemini Flash allows 15 Requests Per Minute)
 # We make 3 calls per ticker, so we need to spread them out.
@@ -32,4 +34,5 @@ API_SLEEP_SECONDS = int(os.environ.get("API_SLEEP_SECONDS", 15)) # spacing betwe
 GEMINI_MIN_SECONDS_BETWEEN_CALLS = int(os.environ.get("GEMINI_MIN_SECONDS_BETWEEN_CALLS", 15))
 GEMINI_MAX_RETRIES_ON_429 = int(os.environ.get("GEMINI_MAX_RETRIES_ON_429", 1))
 GEMINI_QUOTA_STATE_PATH = os.environ.get("GEMINI_QUOTA_STATE_PATH", "logs/gemini_quota_state.json")
+ENGINE_EVENTS_PATH = os.environ.get("ENGINE_EVENTS_PATH", "logs/engine_events.jsonl")
 MACRO_DOWNTURN_LIMIT = -2.0 # Halt buying if SPY is down > 2%
