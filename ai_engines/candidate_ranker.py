@@ -30,30 +30,33 @@ def detect_market_regime(spy_history: list[dict[str, Any]]) -> str:
 
 
 def build_features(symbol: str, bars: list[dict[str, Any]], spy_history: list[dict[str, Any]], news_items: list[dict[str, Any]]):
-    if not bars or len(bars) < 5:
+    # Daily bars can be <5 around weekends/holidays; require only a minimal
+    # amount of structure and adapt lookbacks dynamically.
+    if not bars or len(bars) < 3:
         return None
     closes = [float(x.get("c", 0.0)) for x in bars if float(x.get("c", 0.0)) > 0]
     vols = [float(x.get("v", 0.0)) for x in bars if float(x.get("v", 0.0)) >= 0]
-    if len(closes) < 5:
+    if len(closes) < 3:
         return None
 
     ret_1d = _pct(closes[-1], closes[-2])
-    ret_3d = _pct(closes[-1], closes[-4])
+    ret_3d = _pct(closes[-1], closes[-4]) if len(closes) >= 4 else _pct(closes[-1], closes[0])
     ret_5d = _pct(closes[-1], closes[0])
 
     ema3 = mean(closes[-3:])
-    ema5 = mean(closes[-5:])
+    ema5 = mean(closes[-5:]) if len(closes) >= 5 else mean(closes)
     trend_gap = _pct(ema3, ema5)
 
-    avg_vol = mean(vols[-5:]) if vols else 0.0
+    vol_window = vols[-5:] if len(vols) >= 5 else vols
+    avg_vol = mean(vol_window) if vol_window else 0.0
     vol_mult = (vols[-1] / avg_vol) if avg_vol > 0 else 1.0
     vol_stability = 1.0
-    if len(vols) >= 5 and avg_vol > 0:
-        dev = mean(abs(v - avg_vol) / avg_vol for v in vols[-5:])
+    if len(vols) >= 3 and avg_vol > 0:
+        dev = mean(abs(v - avg_vol) / avg_vol for v in vol_window)
         vol_stability = _clamp(1.0 - dev, 0.0, 1.0)
 
     spy_closes = [float(x.get("c", 0.0)) for x in spy_history if float(x.get("c", 0.0)) > 0]
-    spy_ret_5d = _pct(spy_closes[-1], spy_closes[0]) if len(spy_closes) >= 5 else 0.0
+    spy_ret_5d = _pct(spy_closes[-1], spy_closes[0]) if len(spy_closes) >= 2 else 0.0
     rel_strength_5d = ret_5d - spy_ret_5d
 
     news_count = len(news_items or [])
