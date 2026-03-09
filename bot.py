@@ -43,7 +43,7 @@ def get_top_movers(limit=15):
         response = screener_client.get_market_movers(req)
         
         movers = []
-        for mover in response.gainers:
+        for mover in response.gainers + response.losers:
             movers.append({
                 "symbol": mover.symbol,
                 "price": float(mover.price),
@@ -98,9 +98,9 @@ def get_ai_recommendation(market_state):
     {json.dumps(market_state, indent=2)}
     
     Rules for ABSOLUTE COMPLIANCE:
-    1. STRICT EXITS (Profits): If any 'open_positions' have an 'unrealized_pl_pct' greater than 0.5%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to lock in the profit. Do not get greedy. Take the cash.
+    1. STRICT EXITS (Profits): If any 'open_positions' have an 'unrealized_pl_pct' greater than 1.5%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to lock in the 1-2% increment. Reinvest the cash in the next cycle.
     2. STRICT EXITS (Losses): If any 'open_positions' drop below -1.0%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to ruthlessly cut the loss. No hoping for a bounce.
-    3. AGGRESSIVE ENTRIES: Look at 'todays_top_movers'. If you have 'buying_power', aggressively buy the #1 or #2 momentum stocks to catch the wave. Do NOT recommend fractional shares; round down your 'qty' to the nearest whole integer.
+    3. AGGRESSIVE ENTRIES: Look at 'todays_top_movers' which contains both top gainers and top losers. It doesn't matter if it's a popular tech stock like Apple/Google or from another sector. If you have 'buying_power', evaluate them for strong growth or rebound potential. If there's a strong buy candidate, recommend a "buy" to increase our money. Do NOT recommend fractional shares; round down your 'qty' to the nearest whole integer.
     4. END OF DAY: If the current time is nearing market close, you MUST sell all open positions regardless of profit/loss.
     
     Analyze the current state and provide your recommended trades. You must output valid JSON ONLY, with the following structure:
