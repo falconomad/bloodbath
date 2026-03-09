@@ -1,9 +1,118 @@
 import json
 import logging
+import os
+import re
+import time
+from datetime import datetime, timezone
 from google import genai
 import config
 
 client = genai.Client(api_key=config.GEMINI_API_KEY)
+
+_quota_state = {
+    "date": "",
+    "daily_calls": 0,
+    "last_call_ts": 0.0,
+}
+
+
+def _load_quota_state():
+    global _quota_state
+    path = config.GEMINI_QUOTA_STATE_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _quota_state.update(data)
+    except Exception:
+        pass
+
+
+def _save_quota_state():
+    path = config.GEMINI_QUOTA_STATE_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(_quota_state, f)
+
+
+def _today_utc():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _rate_limited_generate(prompt: str):
+    _load_quota_state()
+    today = _today_utc()
+    if _quota_state.get("date") != today:
+        _quota_state["date"] = today
+        _quota_state["daily_calls"] = 0
+
+    # Respect free-tier day cap guard before calling provider.
+    if int(_quota_state.get("daily_calls", 0)) >= 18:
+        raise RuntimeError("Gemini daily safety budget reached.")
+
+    # Ensure spacing between calls.
+    now = time.time()
+    elapsed = now - float(_quota_state.get("last_call_ts", 0.0))
+    min_gap = max(int(config.GEMINI_MIN_SECONDS_BETWEEN_CALLS), 0)
+    if elapsed < min_gap:
+        time.sleep(min_gap - elapsed)
+
+    retries = max(int(config.GEMINI_MAX_RETRIES_ON_429), 0)
+    attempt = 0
+    while True:
+        try:
+            response = client.models.generate_content(
+                model=config.GEMINI_MODEL,
+                contents=prompt,
+            )
+            _quota_state["daily_calls"] = int(_quota_state.get("daily_calls", 0)) + 1
+            _quota_state["last_call_ts"] = time.time()
+            _save_quota_state()
+            return response
+        except Exception as exc:
+            msg = str(exc)
+            is_429 = "429" in msg or "RESOURCE_EXHAUSTED" in msg
+            if not is_429 or attempt >= retries:
+                raise
+            # Parse "retry in Xs" hints when present.
+            match = re.search(r"retry in ([0-9]+(?:\\.[0-9]+)?)s", msg.lower())
+            wait_s = float(match.group(1)) if match else 60.0
+            wait_s = max(wait_s, float(config.GEMINI_MIN_SECONDS_BETWEEN_CALLS))
+            logging.warning("[ExecutiveBoard] Gemini 429; sleeping %.2fs before retry", wait_s)
+            time.sleep(wait_s)
+            attempt += 1
+
+
+def _deterministic_fallback(symbol, current_positions, technical_report, sentiment_report, reason):
+    held = next((p for p in current_positions if p.get("symbol") == symbol), None)
+    tech = int(technical_report.get("score", 0) or 0)
+    sent = int(sentiment_report.get("score", 50) or 50)
+    if held:
+        pnl = float(held.get("unrealized_pl_pct", 0.0))
+        if pnl > config.PROFIT_TAKE_PCT or pnl < config.STOP_LOSS_PCT:
+            return {
+                "symbol": symbol,
+                "action": "sell",
+                "allocation_pct": 100,
+                "chain_of_thought": f"Fallback deterministic exit trigger. {reason}",
+            }
+    if tech > 70 and sent > 70:
+        alloc = 60 if (tech > 85 and sent > 85) else 40
+        return {
+            "symbol": symbol,
+            "action": "buy",
+            "allocation_pct": alloc,
+            "chain_of_thought": f"Fallback deterministic buy due to strong dual conviction. {reason}",
+        }
+    return {
+        "symbol": symbol,
+        "action": "hold",
+        "allocation_pct": 0,
+        "chain_of_thought": f"Fallback deterministic hold. {reason}",
+    }
 
 def make_final_decision(symbol, current_positions, buying_power, technical_report, sentiment_report):
     """
@@ -37,14 +146,17 @@ def make_final_decision(symbol, current_positions, buying_power, technical_repor
     """
     
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
+        response = _rate_limited_generate(prompt)
         text = response.text.replace('```json', '').replace('```', '').strip()
         data = json.loads(text)
         data['symbol'] = symbol
         return data
     except Exception as e:
         logging.error(f"[ExecutiveBoard] Error synthesizing decision for {symbol}: {e}", exc_info=True)
-        return {"symbol": symbol, "action": "hold", "allocation_pct": 0, "chain_of_thought": "Executive engine failed."}
+        return _deterministic_fallback(
+            symbol=symbol,
+            current_positions=current_positions,
+            technical_report=technical_report,
+            sentiment_report=sentiment_report,
+            reason=f"Executive engine failed: {e}",
+        )

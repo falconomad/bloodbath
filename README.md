@@ -1,73 +1,37 @@
-AI Stock Advisor Project
+Bloodbath Engine (Headless)
 
-Features:
-- Finnhub news integration
-- Hugging Face FinBERT sentiment analysis
-- Technical indicators
-- Event detection (with upcoming earnings calendar boost)
-- Complex scoring engine
-- Streamlit dashboard
-- Goal-driven agent pacing (capital target + deadline)
-- React dashboard (Netlify-ready) + Python API
+This repository now runs a headless trading engine:
+- pulls market/news context from Alpaca
+- computes local technical + sentiment pre-scores
+- sends only shortlisted symbols to Gemini for final decision
+- validates through risk manager
+- executes orders via Alpaca API
 
-Setup:
+Run:
 
-1. Add `FINNHUB_API_KEY` in `.env`.
-2. Optional fallback: add `ALPACA_API_KEY` and `ALPACA_API_SECRET` to use Alpaca market data as a secondary price source.
-   - Optional: `ALPACA_DATA_BASE_URL` (default `https://data.alpaca.markets/v2`)
-3. Optional resilience cache: set `PRICE_CACHE_DIR` to reuse recently fetched OHLCV data when providers are throttled (defaults to `.cache/price_data`).
-4. Optional trading profile: set `TRADE_MODE` to `NORMAL` (default) or `AGGRESSIVE`.
-   - `NORMAL` defaults: `SIGNAL_BUY_THRESHOLD=1.0`, `SIGNAL_SELL_THRESHOLD=-1.0`, `TOP20_MIN_BUY_SCORE=0.75`
-   - `AGGRESSIVE` defaults: `SIGNAL_BUY_THRESHOLD=0.55`, `SIGNAL_SELL_THRESHOLD=-0.7`, `TOP20_MIN_BUY_SCORE=0.45`
-   - You can override any threshold directly with env vars if needed.
-5. Optional execution realism:
-   - `TOP20_SLIPPAGE_BPS` (default `5.0`)
-   - `TOP20_FEE_BPS` (default `1.0`)
-   These are applied to buys/sells in simulation.
-6. Optional rotating fetch: `FETCH_BATCH_SIZE` (default `20`, which means no rotation for TOP20).
-   - Example: set `FETCH_BATCH_SIZE=5` to fetch 5 symbols per run and rotate chunks.
-7. Configure objective in `config/agent_goal.yaml` (or env overrides):
-   - `start_capital`
-   - `target_capital`
-   - `horizon_days`
-   - `start_date` (optional ISO-8601)
-8. Goal env overrides (optional):
-   - `AGENT_GOAL_START_CAPITAL`
-   - `AGENT_GOAL_TARGET_CAPITAL`
-   - `AGENT_GOAL_HORIZON_DAYS`
-   - `AGENT_GOAL_START_DATE`
-9. API backend:
+1. Set env vars:
+   - `ALPACA_API_KEY`
+   - `ALPACA_API_SECRET`
+   - `GEMINI_API_KEY`
+2. Install dependencies:
    - `pip install -r requirements.txt`
-   - `uvicorn api.server:app --host 0.0.0.0 --port 8000`
-10. React frontend:
-   - `cd frontend/react`
-   - `npm install`
-   - `cp .env.example .env` and set `VITE_API_BASE_URL`
-   - `npm run dev`
-11. Legacy Streamlit dashboard:
-   - `streamlit run frontend/streamlit_app.py`
-   - `streamlit run app.py` (legacy entrypoint)
+3. Execute:
+   - `python main.py`
 
-Netlify deploy (React app):
+Gemini optimization knobs:
 
-- Base directory: `frontend/react`
-- Build command: `npm run build`
-- Publish directory: `dist`
-- Environment variable:
-  - `VITE_API_BASE_URL=https://<your-backend-domain>`
+- `MAX_GEMINI_CALLS_PER_RUN` (default `3`)
+- `PRE_FILTER_MIN_TECH_SCORE` (default `55`)
+- `PRE_FILTER_MIN_SENTIMENT_SCORE` (default `45`)
+- `API_SLEEP_SECONDS` (default `15`)
+- `GEMINI_MIN_SECONDS_BETWEEN_CALLS` (default `15`)
+- `GEMINI_MAX_RETRIES_ON_429` (default `1`)
+- `GEMINI_MODEL` (default `gemini-2.5-flash`)
+- `GEMINI_QUOTA_STATE_PATH` (default `logs/gemini_quota_state.json`)
 
-Backend endpoints (summary):
-
-- `GET /health`
-- `GET /api/portfolio`
-- `GET /api/transactions`
-- `GET /api/positions`
-- `GET /api/signals`
-- `GET /api/goal/latest`
-- `GET /api/manual-checks`
-- `POST /api/manual-checks`
-- `DELETE /api/manual-checks/{ticker}`
-- `POST /api/cycle/run`
+Notes:
+- Engine uses deterministic fallbacks if Gemini returns `429 RESOURCE_EXHAUSTED`.
+- Risk manager still enforces allocation caps and macro crash protection before execution.
 
 Fresh Start (Reset State + Set Capital):
 
@@ -122,3 +86,4 @@ Finnhub External Data Ingestion (Free-Tier Safe):
 - `./.venv/bin/python scripts/ingest_finnhub_history.py --universe top20 --sleep-sec 1.1 --max-requests 45`
 - Test plan without credentials/calls:
   - `./.venv/bin/python scripts/ingest_finnhub_history.py --universe top20 --max-symbols 5 --dry-run`
+# Placeholder

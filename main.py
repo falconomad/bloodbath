@@ -102,41 +102,78 @@ def main():
     print("\n" + "="*50)
     print("🧠 ENGAGING AI COUNCIL FOR INDIVIDUAL ASSETS 🧠")
     print("="*50)
-    
-    final_recommendations = []
-    
+
+    # Phase A: local deterministic pre-scoring for all candidates (0 Gemini calls).
+    pre_scored = []
     for mover in top_movers:
         symbol = mover["symbol"]
         print(f"\n--- Analyzing: {symbol} ---")
-        
+
         sym_history = history.get(symbol, [])
         sym_news = news_context.get(symbol, [])
         sym_events = upcoming_events.get(symbol, "None")
-        
+
         if not sym_history:
-             print(f"   ⚠️ Skipping {symbol} due to missing price history.")
-             continue
-        
-        # Engine 1: Technical
-        print("   🤖 Running Technical Analyst...")
+            print(f"   ⚠️ Skipping {symbol} due to missing price history.")
+            continue
+
+        print("   ⚙️ Running local technical + sentiment pre-score...")
         tech_report = technical_analyst.evaluate_technicals(symbol, sym_history, spy_context)
-        print(f"      -> Score: {tech_report.get('score', 0)}/100 | {tech_report.get('rationale', 'No rationale')}")
-        
-        # Engine 2: Sentiment
-        print("   🤖 Running Sentiment Analyst...")
         sent_report = sentiment_analyst.evaluate_sentiment(symbol, sym_news, sym_events, macro_calendar)
-        print(f"      -> Score: {sent_report.get('score', 0)}/100 | {sent_report.get('rationale', 'No rationale')}")
-        
-        # Engine 3: Executive Board
+        tech_score = int(tech_report.get("score", 0) or 0)
+        sent_score = int(sent_report.get("score", 0) or 0)
+        blend = (0.65 * tech_score) + (0.35 * sent_score)
+        print(f"      -> Technical: {tech_score}/100 | Sentiment: {sent_score}/100 | Blend: {blend:.1f}")
+        pre_scored.append(
+            {
+                "mover": mover,
+                "tech_report": tech_report,
+                "sent_report": sent_report,
+                "blend": blend,
+            }
+        )
+
+    if not pre_scored:
+        print("\n🤷 No candidates survived local pre-scoring.")
+        return
+
+    shortlisted = [
+        item for item in pre_scored
+        if int(item["tech_report"].get("score", 0)) >= config.PRE_FILTER_MIN_TECH_SCORE
+        and int(item["sent_report"].get("score", 0)) >= config.PRE_FILTER_MIN_SENTIMENT_SCORE
+    ]
+    if not shortlisted:
+        print(
+            f"\n[PreFilter] No symbols met thresholds "
+            f"(tech>={config.PRE_FILTER_MIN_TECH_SCORE}, sentiment>={config.PRE_FILTER_MIN_SENTIMENT_SCORE})."
+        )
+        return
+
+    shortlisted.sort(key=lambda x: x["blend"], reverse=True)
+    gemini_budget = max(int(config.MAX_GEMINI_CALLS_PER_RUN), 1)
+    selected_for_gemini = shortlisted[:gemini_budget]
+    print(
+        f"\n[PreFilter] {len(shortlisted)} passed local thresholds. "
+        f"Sending top {len(selected_for_gemini)} to Gemini (budget={gemini_budget}/run)."
+    )
+
+    final_recommendations = []
+    for idx, item in enumerate(selected_for_gemini):
+        mover = item["mover"]
+        symbol = mover["symbol"]
+        tech_report = item["tech_report"]
+        sent_report = item["sent_report"]
+
         print("   👑 Running Executive Board Synthesis...")
         exec_decision = executive_board.make_final_decision(symbol, current_positions, buying_power, tech_report, sent_report)
         print(f"      -> Action: {exec_decision.get('action', 'HOLD').upper()} | Alloc: {exec_decision.get('allocation_pct', 0)}%")
         print(f"      -> Reasoning: {exec_decision.get('chain_of_thought', '')}")
-        
+
         final_recommendations.append(exec_decision)
-        
-        print(f"   ⏱️ Sleeping {config.API_SLEEP_SECONDS}s to respect Gemini API Rate Limits...")
-        time.sleep(config.API_SLEEP_SECONDS)
+
+        if idx < len(selected_for_gemini) - 1:
+            print(f"   ⏱️ Sleeping {config.API_SLEEP_SECONDS}s to respect Gemini API rate limits...")
+            time.sleep(config.API_SLEEP_SECONDS)
 
     # ---------------------------------------------------------
     # 5. RISK MANAGEMENT & EXECUTION
