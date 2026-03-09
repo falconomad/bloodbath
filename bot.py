@@ -9,7 +9,8 @@ from alpaca.data.requests import StockLatestQuoteRequest, StockSnapshotRequest
 from alpaca.data.historical.screener import ScreenerClient
 from alpaca.data.requests import MarketMoversRequest
 from alpaca.data.models.screener import MarketType
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.historical.news import NewsClient
+from alpaca.data.requests import StockBarsRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,7 @@ if not ALPACA_API_KEY or not ALPACA_API_SECRET or not GEMINI_API_KEY:
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_API_SECRET)
 screener_client = ScreenerClient(ALPACA_API_KEY, ALPACA_API_SECRET)
+news_client = NewsClient(ALPACA_API_KEY, ALPACA_API_SECRET)
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_top_movers(limit=15):
@@ -77,6 +79,32 @@ def get_history_context(symbols):
     except Exception as e:
         print(f"Error fetching history data: {e}")
         return {}
+
+def get_news_context(symbols):
+    try:
+        req = NewsRequest(symbols=",".join(symbols), limit=min(50, len(symbols)*3))
+        res = news_client.get_news(req)
+        
+        # Depending on alpaca-py version, news might be in res.data["news"] or res.news
+        articles = res.data.get("news", []) if hasattr(res, 'data') and isinstance(res.data, dict) else getattr(res, 'news', [])
+        if not articles and hasattr(res, 'news'):
+            articles = res.news
+            
+        news_by_symbol = {}
+        for article in articles:
+            for sym in article.symbols:
+                if sym not in news_by_symbol:
+                    news_by_symbol[sym] = []
+                if len(news_by_symbol[sym]) < 3:
+                     news_by_symbol[sym].append({
+                         "headline": article.headline,
+                         "summary": getattr(article, 'summary', '')
+                     })
+        return news_by_symbol
+    except Exception as e:
+        print(f"Error fetching news: {e}")
+        return {}
+
 def get_market_state():
     # Get account info
     account = trading_client.get_account()
@@ -107,9 +135,13 @@ def get_market_state():
     
     spy_context = history.pop("SPY", [])
     
-    # Inject history into movers
+    # Get recent news for the top movers
+    news_context = get_news_context([m["symbol"] for m in top_movers])
+    
+    # Inject history and news into movers
     for m in top_movers:
         m["history"] = history.get(str(m.get("symbol")), [])
+        m["news"] = news_context.get(str(m.get("symbol")), [])
             
     return {
         "account": {
@@ -132,13 +164,13 @@ def get_ai_recommendation(market_state):
     Rules for ABSOLUTE COMPLIANCE:
     1. STRICT EXITS (Profits): If any 'open_positions' have an 'unrealized_pl_pct' greater than 1.5%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to lock in the 1-2% increment. Reinvest the cash in the next cycle.
     2. STRICT EXITS (Losses): If any 'open_positions' drop below -1.0%, you MUST immediately recommend a "sell" action for the ENTIRE quantity to ruthlessly cut the loss. No hoping for a bounce.
-    3. AGGRESSIVE ENTRIES: Look at 'todays_top_movers' which contains both top gainers and top losers. It doesn't matter if it's a popular tech stock like Apple/Google or from another sector. If you have 'buying_power', evaluate them for strong growth or rebound potential. Read their 'history' prices. If there's a strong candidate, recommend a "buy" to increase our money. 
+    3. AGGRESSIVE ENTRIES: Look at 'todays_top_movers' which contains both top gainers and top losers. It doesn't matter if it's a popular tech stock like Apple/Google or from another sector. If you have 'buying_power', evaluate them for strong growth or rebound potential. Read their 'history' prices and evaluate their recent 'news' sentiment. Identify any upcoming events like earnings calls or corporate announcements from the news. If there's a strong candidate with good technicals AND sentiment, recommend a "buy" to increase our money. 
     4. POSITION SIZING: Instead of specific quantities, use an allocation percentage of your available 'buying_power' (e.g., 50 means use 50% of buying power). Do NOT allocate more than 50% of your buying power to a single new ticker in this cycle. If recommending a "sell", set allocation_pct to 100 to dump the whole position.
     5. END OF DAY: If the current time is nearing market close, you MUST sell all open positions regardless of profit/loss.
     
     Analyze the current state and provide your recommended trades. You must explain your chain-of-thought reasoning first, then provide the trades. You must output valid JSON ONLY, with the following structure:
     {{
-        "chain_of_thought": "Briefly evaluate SPY, the general top movers history, and justify the selected trades mapping back to the absolute compliance rules.",
+        "chain_of_thought": "Briefly evaluate SPY, the general top movers history, weigh the fundamental news/events sentiment, and justify the selected trades mapping back to the absolute compliance rules.",
         "trades": [
             {{
                 "symbol": "TICKER",
