@@ -16,15 +16,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
           cache-dependency-path: requirements.txt
 
+      - name: Cache virtualenv
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-venv-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
       - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          pip install -r requirements.txt
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --disable-pip-version-check --prefer-binary -r requirements.txt
 
       - name: Run Trading Bot
         env:
@@ -34,4 +45,4 @@ jobs:
           GEMINI_MINUTE_STEP: "20"
           GEMINI_MAX_RETRIES_ON_429: "0"
           ONLY_WHEN_MARKET_OPEN: "true"
-        run: python main.py
+        run: .venv/bin/python main.py
