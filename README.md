@@ -15,7 +15,8 @@ The main entrypoint is `python main.py`.
 The live automation path is GitHub Actions:
 - workflow file: `.github/workflows/trading.yml`
 - workflow name in GitHub: `Trading Bot Execution`
-- trigger: every 10 minutes on weekdays, plus manual runs
+- trigger: `workflow_dispatch`
+- recommended automation: an external scheduler such as `cron-job.org` hitting the GitHub Actions dispatch endpoint
 
 Required GitHub Secrets
 
@@ -56,5 +57,7 @@ These are runtime artifacts and should not be committed:
 GitHub Actions Notes
 
 - Keep `.github/workflows/trading.yml`.
+- The workflow is now dispatch-only so you do not get duplicate runs from GitHub's own schedule plus `cron-job.org`.
+- A market clock check runs before the bot, and the workflow exits successfully without running the bot when Alpaca reports the market is closed.
 - The workflow now uploads the `logs/` directory as a GitHub Actions artifact so each run can be reviewed.
 - If you see other workflows in GitHub but not in this repo, they are likely from another branch or an older state and should be compared against this file before keeping them.

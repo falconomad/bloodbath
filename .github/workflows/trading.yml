@@ -1,8 +1,6 @@
 name: Trading Bot Execution
 
 on:
-  schedule:
-    - cron: '*/10 * * * 1-5' # Every 10 minutes, Mon-Fri
   workflow_dispatch: # Allows manual UI trigger
 
 permissions:
@@ -39,17 +37,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install --disable-pip-version-check --prefer-binary -r requirements.txt
 
-      - name: Validate required secrets
+      - name: Validate Alpaca secrets
         run: |
           test -n "$ALPACA_API_KEY" || (echo "Missing secret: ALPACA_API_KEY" && exit 1)
           test -n "$ALPACA_API_SECRET" || (echo "Missing secret: ALPACA_API_SECRET" && exit 1)
+
+      - name: Check Alpaca market clock
+        id: market-clock
+        run: python scripts/check_market_open.py
+
+      - name: Validate Gemini secret
+        if: steps.market-clock.outputs.market_open == 'true'
+        run: |
           test -n "$GEMINI_API_KEY" || (echo "Missing secret: GEMINI_API_KEY" && exit 1)
 
       - name: Run Trading Bot
+        if: steps.market-clock.outputs.market_open == 'true'
         run: python main.py
 
+      - name: Skip closed market run
+        if: steps.market-clock.outputs.market_open != 'true'
+        run: echo "Market is closed. Skipping bot run cleanly."
+
       - name: Upload trading logs
-        if: always()
+        if: always() && steps.market-clock.outputs.market_open == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: trading-bot-logs
