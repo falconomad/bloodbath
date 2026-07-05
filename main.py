@@ -5,6 +5,7 @@ import config
 from data_ingestion import market_data, news_feed, calendar_events
 from ai_engines import candidate_ranker, executive_board, sentiment_analyst, technical_analyst
 from execution import risk_manager, telemetry, trade_executor
+from execution.notifications import send_push_notification
 from alpaca.trading.client import TradingClient
 
 
@@ -528,7 +529,21 @@ def main():
                     path=config.ENGINE_EVENTS_PATH,
                 )
                 
+                # Trigger real-time mobile push notification
+                action_str = str(validated_trade.get("action")).upper()
+                symbol_str = str(validated_trade.get("symbol")).upper()
+                qty_val = validated_trade.get("qty")
+                send_push_notification(
+                    title="Trade Executed!",
+                    body=f"{symbol_str} ({action_str}) - {qty_val} shares filled successfully."
+                )
+                
     print(f"\n✅ Pipeline Complete. Executed {trades_executed} trades today.")
+    if trades_executed > 0:
+        send_push_notification(
+            title="Trading Pipeline Complete",
+            body=f"✅ Finished executing {trades_executed} trades today."
+        )
     _write_profit_summary(
         trading_client=trading_client,
         fallback_account_snapshot=account_snapshot_at_start,

@@ -2,3 +2,5 @@ alpaca-py
 google-genai
 yfinance
 requests
+firebase-admin
+
