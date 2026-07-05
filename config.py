@@ -29,7 +29,6 @@ if not ALPACA_API_KEY or not ALPACA_API_SECRET or not GEMINI_API_KEY:
 
 # Global Settings
 PAPER_TRADING = True
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Hardcoded Trading Rules & Risk Management limits
 MAX_ALLOCATION_PCT = 20 # Never put more than 20% of buying power into a single trade
@@ -51,13 +50,29 @@ MAX_RELAXED_CANDIDATES = int(os.environ.get("MAX_RELAXED_CANDIDATES", 1))
 GEMINI_MINUTE_STEP = int(os.environ.get("GEMINI_MINUTE_STEP", 30))
 ONLY_WHEN_MARKET_OPEN = _bool_env("ONLY_WHEN_MARKET_OPEN", True)
 
-# Free Tier Rate Limits (Gemini Flash allows 15 Requests Per Minute)
-# We make 3 calls per ticker, so we need to spread them out.
-API_SLEEP_SECONDS = int(os.environ.get("API_SLEEP_SECONDS", 15)) # spacing between Gemini calls
-GEMINI_MIN_SECONDS_BETWEEN_CALLS = int(os.environ.get("GEMINI_MIN_SECONDS_BETWEEN_CALLS", 15))
+# Gemini Paid Tier Toggle
+GEMINI_PAID_TIER = _bool_env("GEMINI_PAID_TIER", False)
+
+# Gemini Rate Limit Guards
+if GEMINI_PAID_TIER:
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+    API_SLEEP_SECONDS = int(os.environ.get("API_SLEEP_SECONDS", 1))
+    GEMINI_MIN_SECONDS_BETWEEN_CALLS = int(os.environ.get("GEMINI_MIN_SECONDS_BETWEEN_CALLS", 0))
+    GEMINI_DAILY_LIMIT = int(os.environ.get("GEMINI_DAILY_LIMIT", 5000))
+else:
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    API_SLEEP_SECONDS = int(os.environ.get("API_SLEEP_SECONDS", 15))
+    GEMINI_MIN_SECONDS_BETWEEN_CALLS = int(os.environ.get("GEMINI_MIN_SECONDS_BETWEEN_CALLS", 15))
+    GEMINI_DAILY_LIMIT = int(os.environ.get("GEMINI_DAILY_LIMIT", 18))
+
 GEMINI_MAX_RETRIES_ON_429 = int(os.environ.get("GEMINI_MAX_RETRIES_ON_429", 1))
 GEMINI_QUOTA_STATE_PATH = os.environ.get("GEMINI_QUOTA_STATE_PATH", "logs/gemini_quota_state.json")
 ENGINE_EVENTS_PATH = os.environ.get("ENGINE_EVENTS_PATH", "logs/engine_events.jsonl")
 PROFIT_SUMMARY_PATH = os.environ.get("PROFIT_SUMMARY_PATH", "logs/profit_summary.json")
 BASELINE_EQUITY = _float_env("BASELINE_EQUITY", 0.0)
 MACRO_DOWNTURN_LIMIT = -2.0 # Halt buying if SPY is down > 2%
+
+# Day Trading & Safety Controls
+TRAILING_STOP_PCT = _float_env("TRAILING_STOP_PCT", 2.5) # Sell if position drops 2.5% from its peak price
+EOD_LIQUIDATION_MINUTES = int(os.environ.get("EOD_LIQUIDATION_MINUTES", 15)) # Close all positions 15 min before market close
+POSITION_PEAKS_PATH = os.environ.get("POSITION_PEAKS_PATH", "logs/position_peaks.json")

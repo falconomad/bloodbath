@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime, timezone
 import config
@@ -64,11 +65,32 @@ def _write_profit_summary(trading_client, fallback_account_snapshot, fallback_po
 
 def _forced_exit_recommendations(current_positions):
     forced = []
+    
+    # Load position peaks for stateful trailing stop loss
+    peaks = {}
+    peaks_path = config.POSITION_PEAKS_PATH
+    if os.path.exists(peaks_path):
+        try:
+            with open(peaks_path, "r", encoding="utf-8") as f:
+                peaks = json.load(f)
+        except Exception:
+            pass
+
+    updated_peaks = {}
+
     for p in (current_positions or []):
         symbol = str(p.get("symbol", "")).upper().strip()
         if not symbol:
             continue
         pnl = float(p.get("unrealized_pl_pct", 0.0))
+        curr_price = float(p.get("current_price", 0.0))
+        
+        # 1. Keep track of highest price (peak) since entry
+        prev_peak = float(peaks.get(symbol, 0.0))
+        new_peak = max(prev_peak, curr_price)
+        updated_peaks[symbol] = new_peak
+        
+        # 2. Check profit take limit
         if pnl > float(config.PROFIT_TAKE_PCT):
             forced.append(
                 {
@@ -78,7 +100,10 @@ def _forced_exit_recommendations(current_positions):
                     "chain_of_thought": f"Deterministic profit-take trigger ({pnl:.2f}% > {config.PROFIT_TAKE_PCT:.2f}%).",
                 }
             )
-        elif pnl < float(config.STOP_LOSS_PCT):
+            continue
+            
+        # 3. Check hard stop loss
+        if pnl < float(config.STOP_LOSS_PCT):
             forced.append(
                 {
                     "symbol": symbol,
@@ -87,6 +112,29 @@ def _forced_exit_recommendations(current_positions):
                     "chain_of_thought": f"Deterministic stop-loss trigger ({pnl:.2f}% < {config.STOP_LOSS_PCT:.2f}%).",
                 }
             )
+            continue
+            
+        # 4. Check trailing stop loss drop from peak price
+        if new_peak > 0:
+            drop_pct = ((new_peak - curr_price) / new_peak) * 100.0
+            if drop_pct >= float(config.TRAILING_STOP_PCT):
+                forced.append(
+                    {
+                        "symbol": symbol,
+                        "action": "sell",
+                        "allocation_pct": 100,
+                        "chain_of_thought": f"Deterministic trailing stop trigger (price dropped {drop_pct:.2f}% from peak ${new_peak:.2f} to ${curr_price:.2f}).",
+                    }
+                )
+
+    # Save active position peaks back to disk (clearing out exited positions)
+    try:
+        os.makedirs(os.path.dirname(peaks_path), exist_ok=True)
+        with open(peaks_path, "w", encoding="utf-8") as f:
+            json.dump(updated_peaks, f, indent=2)
+    except Exception:
+        pass
+        
     return forced
 
 
@@ -124,6 +172,38 @@ def main():
         print(f"❌ Failed to fetch account state: {e}")
         return
     account_snapshot_at_start = _snapshot_account(account, buying_power=buying_power)
+
+    # ---------------------------------------------------------
+    # EOD AUTO-LIQUIDATION GATE
+    # ---------------------------------------------------------
+    if market_open:
+        time_until_close = clock.next_close - clock.timestamp
+        time_to_close_mins = time_until_close.total_seconds() / 60.0
+        print(f"⏰ Minutes to Market Close: {time_to_close_mins:.1f}")
+        if time_to_close_mins <= float(config.EOD_LIQUIDATION_MINUTES):
+            print(f"🚨 EOD Auto-Liquidation Triggered! ({time_to_close_mins:.1f} <= {config.EOD_LIQUIDATION_MINUTES} mins remaining)")
+            trades_executed = 0
+            if current_positions:
+                print("🧹 Closing all open positions...")
+                for pos in current_positions:
+                    sym = pos["symbol"]
+                    try:
+                        trading_client.close_position(sym)
+                        trades_executed += 1
+                        print(f"✅ Successfully closed {sym}")
+                    except Exception as close_err:
+                        print(f"❌ Failed to close {sym}: {close_err}")
+            else:
+                print("🧹 No open positions to liquidate.")
+            
+            _write_profit_summary(
+                trading_client=trading_client,
+                fallback_account_snapshot=account_snapshot_at_start,
+                fallback_positions_snapshot=current_positions,
+                trades_executed=trades_executed,
+                run_status="eod_liquidation_complete",
+            )
+            return
 
     forced_exit_recs = _forced_exit_recommendations(current_positions)
     forced_exit_symbols = {str(x.get("symbol", "")).upper() for x in forced_exit_recs}

@@ -49,9 +49,9 @@ def _rate_limited_generate(prompt: str):
         _quota_state["date"] = today
         _quota_state["daily_calls"] = 0
 
-    # Respect free-tier day cap guard before calling provider.
-    if int(_quota_state.get("daily_calls", 0)) >= 18:
-        raise RuntimeError("Gemini daily safety budget reached.")
+    # Respect day cap guard before calling provider.
+    if int(_quota_state.get("daily_calls", 0)) >= int(config.GEMINI_DAILY_LIMIT):
+        raise RuntimeError(f"Gemini daily safety budget reached ({config.GEMINI_DAILY_LIMIT} calls).")
 
     # Ensure spacing between calls.
     now = time.time()
