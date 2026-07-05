@@ -215,3 +215,6 @@ __marimo__/
 # runtime outputs
 logs/*.json
 logs/*.jsonl
+
+# Firebase private key credentials
+firebase-service-account.json
